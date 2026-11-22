@@ -354,6 +354,39 @@ def ai_json(prompt, want=list, timeout=300, kind='fast'):
     raise RuntimeError('AI 失敗：' + '；'.join(errs) + hint)
 
 
+
+def ai_text(prompt, timeout=240, kind='best'):
+    """問 AI，回傳一般文字（問 AI 的回答）"""
+    cmds = ai_cmds(prompt, ai_model(kind))
+    if not cmds: raise RuntimeError('找不到 Claude Code：請先到設定登入 Claude')
+    name, cmd = cmds[0]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
+    except subprocess.TimeoutExpired:
+        raise RuntimeError('AI 超過 %d 秒沒回應，請再試一次' % timeout)
+    out = (r.stdout or '').strip()
+    if r.returncode != 0 or not out:
+        msg = ((r.stderr or out or '沒有回應').strip().splitlines() or [''])[-1][:200]
+        raise RuntimeError(('Claude 登入過期，請到設定重新登入：' if re.search(r'auth|login|expired', msg, re.I) else 'AI 失敗：') + msg)
+    return out
+
+
+def ask_ai(j):
+    """選取一段文字問 AI：帶這本書的書名、選到的字、那一段和前後各一段，還有前面的問答（可以一直追問）"""
+    sel = str(j.get('sel') or '').strip()[:1500]; q = str(j.get('q') or '').strip()[:1000]
+    if not q: raise ValueError('問題是空的')
+    ctx = str(j.get('ctx') or '').strip()[:8000]; title = str(j.get('title') or '').strip()[:200]
+    hist = [h for h in (j.get('history') or []) if isinstance(h, dict) and h.get('q') and h.get('a')][-8:]
+    conv = ''.join('\n\nStudent asked: %s\nYou answered: %s' % (str(h['q'])[:1000], str(h['a'])[:3000]) for h in hist)
+    prompt = ('You are a friendly English reading tutor helping a Taiwanese student who is reading an English book%s.\n'
+              'Answer in Traditional Chinese (台灣用語). Quote English words or phrases when you explain them. '
+              'Be clear and concise (usually under 200 字), use short paragraphs or a short list, no headings. '
+              'You may use **bold** for key words. If the question is about grammar, vocabulary, meaning or nuance, explain with the context below.\n\n'
+              'CONTEXT (the paragraph and its neighbours):\n%s\n\nSELECTED TEXT:\n%s%s\n\nStudent asks now: %s'
+              % ((' titled "%s"' % title) if title else '', ctx or '(none)', sel or '(none)', conv, q))
+    return {'a': ai_text(prompt, kind='best')}
+
+
 def translate(paras):
     numbered = '\n\n'.join('[%d] %s' % (i + 1, p) for i, p in enumerate(paras))
     prompt = ('Translate each numbered English paragraph below into natural Traditional Chinese (台灣用語). '
@@ -1283,6 +1316,10 @@ class H(BaseHTTPRequestHandler):
                 ix = load_index(); ix['profile'] = {'name': str(j.get('name') or '').strip()[:40]}
                 save_index(ix)
             return self.send(200, ix['profile'])
+        if p == ['ask'] and m == 'POST':                # 選取文字問 AI
+            try: return self.send(200, ask_ai(self.body_json()))
+            except ValueError as e: return self.err(400, str(e))
+            except RuntimeError as e: return self.err(500, str(e))
         if p == ['upload'] and m == 'POST':
             data = self.body_bytes()
             if not data.startswith(b'%PDF'): return self.err(400, '這不是 PDF 檔')

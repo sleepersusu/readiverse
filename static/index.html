@@ -460,6 +460,19 @@ dialog.setdlg form{display:flex;flex-direction:column;max-height:min(86vh,860px)
 .updpill{position:fixed;right:18px;bottom:18px;z-index:40;display:flex;align-items:center;gap:10px;flex-wrap:wrap;max-width:min(460px,calc(100vw - 36px));background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:10px 14px;font-size:13.5px}
 .updnotes{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--muted);max-height:180px;overflow:auto}
 #sVer .small{margin-left:6px}
+/* ---------- 問 AI 小視窗 ---------- */
+.askbox{position:fixed;z-index:60;width:min(390px,calc(100vw - 16px));display:flex;flex-direction:column;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.18);padding:10px 12px 12px}
+.askhead{display:flex;align-items:center;justify-content:space-between;cursor:move;user-select:none;margin:-2px -4px 0 0}
+.askhead b{font-size:13.5px}
+.askquote{font-family:var(--f-read);font-size:13.5px;color:var(--muted);border-left:3px solid var(--line);padding:2px 0 2px 9px;max-height:84px;overflow:auto}
+.asklog{max-height:min(46vh,380px);overflow:auto;display:flex;flex-direction:column;gap:6px}
+.askq{align-self:flex-end;max-width:88%;background:var(--soft);border-radius:10px 10px 2px 10px;padding:6px 10px;font-size:13.5px}
+.aska{font-size:14px;line-height:1.65;padding:2px 2px 6px}
+.askbox textarea{width:100%;resize:vertical;font-size:14px}
+.askfoot{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.askfoot .note{font-size:11.5px}
+.askmore{margin-top:4px}
+.askmore .small{font-size:12px;padding:2px 8px;min-height:0}
 </style></head>
 <body>
 <div class="top">
@@ -1018,7 +1031,7 @@ function cardHtml(o,showPg){ const n=o.nid&&ST.notes[o.nid];
   return `<div class="hcard hc${o.c}" data-key="${esc(o.key)}" data-pg="${o.page}" data-i="${o.i}"${o.nid?` data-nid="${o.nid}"`:''}>
     <div class="meta">${showPg?`<span>第 ${o.i+1} 段</span>`:''}${o.orphan?'<span>（螢光筆已清除）</span>':''}<button type="button" class="x" data-rmcard title="${o.nid?'刪除這則筆記和螢光筆':'清除這個螢光筆'}" aria-label="刪除">${trashSvg}</button></div>
     <div class="q" data-jump="${o.i}" title="${esc(o.quote)}">${esc(o.quote)}</div>
-    ${n?`<textarea data-note="${o.nid}" rows="2" placeholder="寫下你的想法…" aria-label="筆記">${esc(n.text||'')}</textarea>`:`<div><button type="button" class="small" data-addnote>＋ 筆記</button></div>`}</div>`; }
+    ${n?`<textarea data-note="${o.nid}" rows="2" placeholder="寫下你的想法…" aria-label="筆記">${esc(n.text||'')}</textarea><div class="askmore"><button type="button" class="small ghost" data-askmore="${o.nid}">${qaOf(n.text).qa.length?'繼續問 AI':'問 AI'}</button></div>`:`<div><button type="button" class="small" data-addnote>＋ 筆記</button></div>`}</div>`; }
 function paraNoteHtml(p,i){ const v=ST.paraNotes[mkey(p,i)]||'';
   return `<textarea class="pnote${v?' has':''}" data-pnt="${i}" rows="1" placeholder="筆記…" aria-label="第 ${i+1} 段的筆記">${esc(v)}</textarea>`; }
 function renderPara(t,M){
@@ -1190,6 +1203,55 @@ function addNoteFor(segs,color,existing){ const nid=newId(); ST.notes[nid]={text
 function focusNote(nid){ const c=document.querySelector(`#sheet .hcard[data-nid="${nid}"]`); if(!c) return; paginate(rowOf(c)); c.classList.add('focus'); setTimeout(()=>c.classList.remove('focus'),1500);
   const ta=c.querySelector('textarea'); if(ta) ta.focus({preventScroll:true}); }
 
+/* ---------- 問 AI：選取文字 → 小視窗裡問問題，可以一直追問，問答存成筆記（顯示在那一段右邊）---------- */
+let ASKEL=null;
+function askClose(){ if(ASKEL){ ASKEL.remove(); ASKEL=null; } }
+function askCtx(idx){ const P=paras(PG), out=[]; const seen=new Set();
+  [...new Set(idx)].sort((a,b)=>a-b).forEach(i=>[i-1,i,i+1].forEach(j=>{ if(!seen.has(j)&&isTxt(P[j])){ seen.add(j); out.push(P[j]); } }));
+  return out.join('\n\n').slice(0,8000); }
+function qaOf(t){ t=String(t||''); const i=t.search(/(^|\n)Q：/); if(i<0) return {pre:t.trim(),qa:[]};
+  const qa=t.slice(i).split(/\n\s*\n(?=Q：)/).map(b=>{ const m=b.trim().match(/^Q：([\s\S]*?)\nA：([\s\S]*)$/); return m?{q:m[1].trim(),a:m[2].trim()}:null; }).filter(Boolean);
+  return {pre:t.slice(0,i).trim(),qa}; }
+function dragBox(d){ const bar=d.firstElementChild; bar.classList.add('dragbar'); bar.title='按住拖曳可以移動';
+  const fit=()=>{ const r=d.getBoundingClientRect(); d.style.left=Math.max(4,Math.min(innerWidth-r.width-4,r.left))+'px'; d.style.top=Math.max(4,Math.min(innerHeight-r.height-4,r.top))+'px'; };
+  bar.addEventListener('pointerdown',e=>{ if(e.button!==0||e.target.closest('button')) return; e.preventDefault();
+    const r=d.getBoundingClientRect(), dx=e.clientX-r.left, dy=e.clientY-r.top; bar.setPointerCapture(e.pointerId);
+    const mv=ev=>{ d.style.left=(ev.clientX-dx)+'px'; d.style.top=(ev.clientY-dy)+'px'; fit(); };
+    const up=()=>{ bar.removeEventListener('pointermove',mv); bar.removeEventListener('pointerup',up); };
+    bar.addEventListener('pointermove',mv); bar.addEventListener('pointerup',up); });
+  try{ new ResizeObserver(fit).observe(d); }catch(e){} }
+function askBox(rect,sel,ctx,onSave,init){ hidePop(); askClose(); const d=document.createElement('div'); d.className='askbox'; ASKEL=d;
+  const H=(init||[]).map(x=>({q:x.q,a:x.a})); let busy=false;
+  const md=t=>esc(t).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>');
+  const paint=()=>{ const lg=d.querySelector('.asklog'); lg.innerHTML=H.map(h=>`<div class="askq">${esc(h.q)}</div><div class="aska">${h.a==null?'<span class="note"><span class="spin"></span>AI 回答中…</span>':h.err?`<span class="err">${esc(h.err)}</span>`:md(h.a)}</div>`).join('');
+    lg.hidden=!H.length; lg.scrollTop=lg.scrollHeight; d.querySelector('[data-ak="save"]').hidden=!H.some(h=>h.a); };
+  d.innerHTML=`<div class="askhead"><b>問 AI</b><button type="button" class="ib ghost" data-ak="x" aria-label="關閉"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="askquote" lang="en">${esc(sel.length>240?sel.slice(0,240)+'…':sel)}</div><div class="asklog" hidden></div>
+    <textarea rows="2" maxlength="1000" placeholder="想問什麼？例如：這句話是什麼意思？這個字可以換成什麼？"></textarea>
+    <div class="askfoot"><button type="button" class="small primary" data-ak="send">送出</button><button type="button" class="small" data-ak="save" hidden>存成筆記</button><span class="note" data-hint>按兩次 Enter 送出・Shift+Enter 換行</span></div>`;
+  d.style.left=Math.max(8,Math.min(innerWidth-400,rect.left))+'px'; d.style.top=Math.max(8,Math.min(innerHeight-440,rect.bottom+8))+'px';
+  document.body.appendChild(d); dragBox(d); const ta=d.querySelector('textarea'); ta.focus(); if(H.length) paint();
+  const send=async()=>{ const q=ta.value.trim(); if(!q||busy) return; busy=true; ta.value=''; const h={q,a:null}; H.push(h); paint();
+    try{ const j=await api.post('/api/ask',{sel,ctx,title:(BOOK&&BOOK.meta.title)||'',q,history:H.slice(0,-1).filter(x=>x.a).map(x=>({q:x.q,a:x.a}))}); h.a=j.a||''; }
+    catch(e){ h.err=e.message||'AI 沒有回應，請再試一次'; h.a=''; }
+    busy=false; if(ASKEL===d){ paint(); ta.focus(); } };
+  // 按兩次 Enter 才送出：注音選字按的 Enter 不會誤送
+  let armed=0; const hint=d.querySelector('[data-hint]'), hint0=hint.textContent, disarm=()=>{ armed=0; hint.textContent=hint0; hint.style.color=''; };
+  ta.addEventListener('keydown',e=>{ if(e.key==='Escape'){ askClose(); return; } if(e.isComposing||e.keyCode===229) return;
+    if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); if(!ta.value.trim()) return;
+      if(armed&&Date.now()-armed<1500){ disarm(); send(); } else { const t=armed=Date.now(); hint.textContent='再按一次 Enter 送出'; hint.style.color='var(--ink)'; setTimeout(()=>{ if(armed===t) disarm(); },1500); } return; }
+    if(armed) disarm(); });
+  d.addEventListener('click',e=>{ const b=e.target.closest('[data-ak]'); if(!b) return; const k=b.dataset.ak;
+    if(k==='x') askClose(); else if(k==='send') send();
+    else if(k==='save'){ const txt=H.filter(x=>x.a).map(x=>'Q：'+x.q+'\nA：'+x.a.replace(/\*\*/g,'')).join('\n\n'); askClose(); onSave(txt); } }); }
+// 問答存成筆記：選到的字畫上螢光筆、筆記放問答（右邊那一段旁邊看得到；全部筆記裡也有）
+function saveAskNote(segs,existing,txt){
+  if(existing&&existing[3]&&ST.notes[existing[3]]){ const n=ST.notes[existing[3]]; n.text=(String(n.text||'').trim()?n.text.trim()+'\n\n':'')+txt; n.t=Date.now(); save(); renderPage(); focusNote(existing[3]); toast('問答已存到筆記'); return; }
+  const nid=newId(); ST.notes[nid]={text:txt,quote:quoteOf(segs),page:PG,i:segs[0][0],t:Date.now()}; applyMark(segs,existing?existing[2]:3,nid); focusNote(nid); toast('問答已存成筆記'); }
+document.addEventListener('click',e=>{ const b=e.target.closest('[data-askmore]'); if(!b) return; const nid=b.dataset.askmore, n=ST.notes[nid]; if(!n) return;
+  const Q=qaOf(n.text), i=n.i|0;
+  askBox(b.getBoundingClientRect(),n.quote||'',askCtx([i]),txt=>{ n.text=(Q.pre?Q.pre+'\n\n':'')+txt; n.t=Date.now(); save(); renderPage(); focusNote(nid); toast('問答已更新'); },Q.qa); });
+
 let POP=null;
 function hidePop(){ if(POP){ POP.remove(); POP=null; } }
 const CNAME=['黃','綠','藍','粉紅'];
@@ -1201,7 +1263,7 @@ function showPop(x,y,ctx){
     +'<span class="sep"></span>'
     +(isDict?`<button type="button" class="ib ghost" data-a="word" title="收進我的字典 ◆（之後所有書裡都會畫底線）" aria-label="收進我的字典" style="color:var(--vw)">${ICV}</button>`:'')
     +(isSent?`<button type="button" class="ib ghost" data-a="phr" title="收藏句子 ✦（AI 會整理句型、例句）" aria-label="收藏句子" style="color:var(--ph)">${ICP}</button>`:'')
-    +`<span class="sep"></span><button type="button" class="ib ghost" data-a="note" title="寫筆記" aria-label="寫筆記"><svg class="i" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></svg></button>`
+    +`<span class="sep"></span><button type="button" class="ib ghost" data-a="ask" title="問 AI（可以一直追問，問答可以存成筆記）" aria-label="問 AI"><svg class="i" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4v.3M12 16.5h.01"/></svg></button><button type="button" class="ib ghost" data-a="note" title="寫筆記" aria-label="寫筆記"><svg class="i" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></svg></button>`
     +(ctx.existing||ctx.hasMark?`<button type="button" class="ib ghost" data-a="clear" title="清除螢光筆" aria-label="清除螢光筆"><svg class="i" viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></button>`:'')
     +`<button type="button" class="ib ghost" data-a="copy" title="複製" aria-label="複製"><svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg></button>`;
   document.body.appendChild(d); POP=d;
@@ -1213,6 +1275,7 @@ function showPop(x,y,ctx){
     else if(b.dataset.a==='copy') navigator.clipboard&&navigator.clipboard.writeText(ctx.quote).then(()=>toast('已複製'),()=>{});
     else if(b.dataset.a==='word') saveWord(one,sctx);
     else if(b.dataset.a==='phr') savePhrase(one,sctx);
+    else if(b.dataset.a==='ask'){ const rc={left:x-180,bottom:y+20}; askBox(rc,ctx.quote,askCtx(ctx.segs.map(s=>s[0])),txt=>saveAskNote(ctx.segs,ctx.existing,txt)); }
     else if(b.dataset.a==='note'){ if(ctx.existing&&ctx.existing[3]) focusNote(ctx.existing[3]); else addNoteFor(ctx.segs,1,ctx.existing); } };
 }
 $('sheet').addEventListener('mouseup',()=>setTimeout(()=>{

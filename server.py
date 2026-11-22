@@ -808,6 +808,9 @@ def proof_job(bid):
     flagged = {int(k) - 1 for k in lost if str(k).isdigit()} | set(bad_pages(pages))
     flagged |= {int(k) - 1 for k, v in recs('fast').items() if str(k).isdigit() and (v or {}).get('failed')}
     flagged |= {int(k) - 1 for k, v in (read_json(os.path.join(d, 'read_ai.json'), {}) or {}).items() if str(k).isdigit() and (v or {}).get('read')}
+    # 有圖片、表格的頁：這一頁和前後各一頁一定要 Sonnet 看（圖表旁邊最容易漏字、段落接錯）
+    figp = {i for i, pg in enumerate(pages) if any(isinstance(x, dict) for x in pg)}
+    flagged |= {j for i in figp for j in (i - 1, i, i + 1)}
     seeds = set(textp[::PROOF_EVERY]) | (flagged & TP); plan = set(seeds)
     while True:
         done_set = checked('best')

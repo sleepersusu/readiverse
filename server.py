@@ -1240,6 +1240,9 @@ def parse_job(bid):
                         i = int(k) - 1
                         if i in frozen or not (0 <= i < len(pages)): continue
                         new = [re.sub(r'\s+', ' ', x).strip() if is_text(x) else x for x in items]
+                        # 有些電子書的 PDF 夾帶網頁碼殘渣（height="0%">、<p 、fileposid=…）：拿掉
+                        new = [re.sub(r'\s{2,}', ' ', re.sub(r'\s*(?:<\s*[A-Za-z][^<>]{0,40}>|[\w%]*="[^"<>]{0,15}">)\s*', ' ', x)).strip() if is_text(x) else x for x in new]
+                        new = [x for x in new if not is_text(x) or x]
                         if i < len(raw): new = fix_dashes(new, ' '.join(x for x in raw[i] if is_text(x)))
                         if i < len(raw) and not scanned:                        # Docling 漏掉的段落：用 PDF 本身的文字補回來
                             nb = [x for q in (i - 1, i + 1) if 0 <= q < len(pages) for x in (j['pages'].get(str(q + 1)) or pages[q])]

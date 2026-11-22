@@ -377,7 +377,7 @@ class H(BaseHTTPRequestHandler):
             with open(os.path.join(d, 'book.pdf'), 'wb') as f: f.write(data)
             meta = {'id': bid, 'title': title, 'autoTitle': title, 'file': name, 'author': '', 'category': (qs.get('category') or [''])[0][:40], 'tags': [],
                     'status': 'unread', 'added': int(time.time() * 1000), 'opened': 0, 'pages': 0, 'lastPage': 0,
-                    'favorite': False, 'hasText': True, 'size': len(data), 'notes': 0, 'marks': 0}
+                    'favorite': False, 'hasText': True, 'size': len(data), 'notes': 0, 'marks': 0, 'cover': False}
             with LOCK:
                 ix = load_index(); ix['books'].insert(0, meta); save_index(ix)
             return self.send(200, meta)
@@ -423,7 +423,11 @@ class H(BaseHTTPRequestHandler):
                 data = self.body_bytes()
                 if data[:2] != b'\xff\xd8': return self.err(400, '封面要是 JPEG')
                 with open(os.path.join(d, 'cover.jpg'), 'wb') as f: f.write(data)
-                return self.send(200, {'ok': True})
+                return self.send(200, update_book(bid, cover=True, coverV=int(time.time() * 1000)))
+            if sub == 'cover' and m == 'DELETE':           # 不用圖片，改用設計好的封面（書名＋作者）
+                try: os.remove(os.path.join(d, 'cover.jpg'))
+                except OSError: pass
+                return self.send(200, update_book(bid, cover=False, coverV=int(time.time() * 1000)))
             if sub == 'state' and m == 'PUT':
                 st = self.body_json()
                 if not isinstance(st, dict): return self.err(400, 'state 格式不對')

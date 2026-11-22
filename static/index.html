@@ -113,13 +113,19 @@ textarea{width:100%;line-height:1.6;border:1px solid var(--line);border-radius:8
 .arr[disabled]{display:none}
 .arr svg{width:26px;height:26px}
 @media (hover:none){.arr{display:none}}
-.dropzone{flex:none;width:168px;aspect-ratio:2/3;border:1.5px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;text-align:center;padding:14px;color:var(--muted);font-size:13px}
+.dropzone{flex:none;width:min(320px,100%);height:64px;border:1.5px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;text-align:center;padding:14px;color:var(--muted);font-size:13px}
 .pc{flex:none;width:168px;scroll-snap-align:start;position:relative;cursor:pointer;outline:none}
-@media (max-width:640px){.pc,.dropzone{width:124px}}
+@media (max-width:640px){.pc{width:124px}}
 .pc .po{position:relative;aspect-ratio:2/3;border-radius:8px;overflow:hidden;background:var(--soft);border:1px solid var(--line);transition:transform .22s cubic-bezier(.2,.7,.3,1),box-shadow .22s}
 .pc .po img{position:relative;z-index:1;width:100%;height:100%;object-fit:cover;display:block}
 .pc .fav,.pc .pb,.pc .ov{z-index:2}
-.pc .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:14px;font-family:var(--f-read);font-size:16px;line-height:1.3;color:var(--ink);background:linear-gradient(160deg,var(--soft),color-mix(in srgb,var(--acc) 14%,var(--soft)))}
+.ph{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:16px 14px 18px;text-align:left;color:#fff;background:linear-gradient(165deg,hsl(var(--hu) 48% 46%),hsl(calc(var(--hu) + 28) 52% 26%));overflow:hidden;container-type:inline-size}
+.ph::after{content:"";position:absolute;left:14px;right:14px;top:34px;height:1px;background:rgba(255,255,255,.35)}
+.ph .pk{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;opacity:.75;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ph .pt{margin-top:14px;font-family:var(--f-read);font-weight:600;font-size:clamp(14px,13cqi,30px);line-height:1.15;letter-spacing:-.01em;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden;text-wrap:balance}
+.ph .pa{margin-top:auto;font-size:clamp(10px,7.5cqi,15px);opacity:.88;font-family:var(--f-ui)}
+.hero .poster{position:relative}
+.hero .poster img{position:relative;z-index:1}
 .pc .fav{position:absolute;top:6px;left:8px;font-size:14px;color:#f5b301;text-shadow:0 1px 3px rgba(0,0,0,.4)}
 .pc .pb{position:absolute;left:0;right:0;bottom:0;height:4px;background:rgba(0,0,0,.25)}
 .pc .pb i{display:block;height:100%;background:var(--acc)}
@@ -169,6 +175,9 @@ dialog::backdrop{background:rgba(0,0,0,.35)}
 dialog h2{font-family:var(--f-zh);font-size:17px;margin:0 0 14px}
 .fld{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
 .fld input,.fld select{width:100%}
+.cvedit{display:flex;gap:16px;align-items:flex-start;margin-bottom:14px}
+.cvedit .fld{gap:6px;align-items:flex-start}
+.cvedit .filebtn{min-height:28px;padding:2px 9px;font-size:12px}
 .danger{color:var(--bad)}
 .danger:hover{border-color:var(--bad)}
 
@@ -340,7 +349,12 @@ const byOpened=(a,b)=>(b.opened||b.added)-(a.opened||a.added);
 const SORTS={opened:byOpened,added:(a,b)=>b.added-a.added,title:(a,b)=>a.title.localeCompare(b.title,'zh-Hant'),progress:(a,b)=>prog(b)-prog(a)};
 function inFilter(b,f){ return f==='fav'?b.favorite:f==='reading'?b.status==='reading':f==='done'?b.status==='done':f==='none'?!b.category:f.startsWith('c:')?b.category===f.slice(2):true; }
 function filterName(f){ return f==='all'?'全部書籍':f==='fav'?'我的最愛':f==='reading'?'閱讀中':f==='done'?'讀完':f==='none'?'未分類':f.slice(2); }
-const coverUrl=b=>`/books/${b.id}/cover.jpg?v=${b.added}`;
+const coverUrl=b=>`/books/${b.id}/cover.jpg?v=${b.coverV||b.added}`;
+const hasCover=b=>b.cover!==false;
+function hueOf(t){ let h=0; for(const c of String(t)) h=(h*31+c.codePointAt(0))>>>0; return h%360; }
+// 設計好的封面：沒有真正封面的書（第一頁是滿滿文字）用書名＋作者
+function designCover(b){ return `<div class="ph" style="--hu:${hueOf(b.title)}"><span class="pk">${esc(b.category||'Readiverse')}</span><span class="pt">${esc(b.title)}</span>${b.author?`<span class="pa">${esc(b.author)}</span>`:''}</div>`; }
+const coverImg=(b,lazy)=>hasCover(b)?`<img src="${coverUrl(b)}" alt="" ${lazy?'loading="lazy" ':''}onerror="this.remove()">`:'';
 const IC={play:'<svg class="i" viewBox="0 0 24 24" style="fill:currentColor;stroke:none"><path d="M7 4.5v15l13-7.5z"/></svg>',
   more:'<svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>',
   star:'<svg class="i" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg>',
@@ -348,7 +362,7 @@ const IC={play:'<svg class="i" viewBox="0 0 24 24" style="fill:currentColor;stro
 function posterCard(b){
   const p=Math.round(prog(b)*100), started=b.opened||b.lastPage;
   return `<div class="pc" role="button" tabindex="0" data-open="${b.id}" draggable="true" data-drag="${b.id}" aria-label="打開 ${esc(b.title)}">
-    <div class="po"><div class="ph">${esc(b.title)}</div><img src="${coverUrl(b)}" alt="" loading="lazy" onerror="this.remove()">${b.favorite?'<span class="fav" aria-label="最愛">★</span>':''}
+    <div class="po">${designCover(b)}${coverImg(b,1)}${b.favorite?'<span class="fav" aria-label="最愛">★</span>':''}
       ${started&&b.status!=='done'?`<div class="pb"><i style="width:${p}%"></i></div>`:''}
       <div class="ov"><div class="t">${esc(b.title)}</div><div class="m">${b.pages?`<span>${started?`${b.lastPage+1}/${b.pages} 頁`:`${b.pages} 頁`}</span>`:''}${b.notes?`<span>✎ ${b.notes}</span>`:''}${b.category?`<span>${esc(b.category)}</span>`:''}</div>
         <div class="b"><button type="button" class="go" data-open="${b.id}" title="${started?'繼續閱讀':'開始閱讀'}" aria-label="${started?'繼續閱讀':'開始閱讀'}">${IC.play}</button><button type="button" data-fav="${b.id}" title="${b.favorite?'取消最愛':'加到最愛'}" aria-label="${b.favorite?'取消最愛':'加到最愛'}" style="${b.favorite?'color:#f5b301':''}">${IC.star}</button><button type="button" data-edit="${b.id}" title="詳細資料" aria-label="詳細資料">${IC.more}</button></div></div>
@@ -358,7 +372,7 @@ function shelf(title,f,L,drop){
   if(!L.length&&!drop) return '';
   return `<section class="shelf"${drop?` data-drop="${esc(f)}"`:''}><div class="hd"><h2>${esc(title)}</h2><span class="cnt">${L.length}</span>${L.length?`<button type="button" class="all" data-f="${esc(f)}">查看全部 ›</button>`:''}</div>
     <button type="button" class="arr l" data-scroll="-1" aria-label="往左" disabled>${IC.l}</button>
-    <div class="track">${L.length?L.slice(0,30).map(posterCard).join(''):'<div class="dropzone">把書拖到這裡<br>放進這個分類</div>'}</div>
+    <div class="track">${L.length?L.slice(0,30).map(posterCard).join(''):'<div class="dropzone">還沒有書：把書拖到這一排，就會放進這個分類</div>'}</div>
     <button type="button" class="arr r" data-scroll="1" aria-label="往右">${IC.r}</button></section>`; }
 function heroHtml(){
   const B=LIB.books;
@@ -366,12 +380,12 @@ function heroHtml(){
     <div class="meta">匯入 PDF（或直接拖進這個視窗），AI 會幫你整理書名、分類和段落。左邊讀英文、右邊寫筆記，螢光筆、中文對照都有。</div>
     <div class="btns"><label class="filebtn primary">選擇 PDF<input type="file" accept="application/pdf,.pdf" multiple data-file></label><button type="button" class="sec" data-settings>設定</button></div></div></div></div>`;
   const b=B.filter(x=>x.opened&&x.status!=='done').sort(byOpened)[0]||B.slice().sort((x,y)=>y.added-x.added)[0], started=b.opened||b.lastPage;
-  return `<div class="hero"><div class="bg" style="background-image:url('${coverUrl(b)}')"></div><div class="in">
+  return `<div class="hero"><div class="bg" style="${hasCover(b)?`background-image:url('${coverUrl(b)}')`:`background:hsl(${hueOf(b.title)} 55% 55%)`}"></div><div class="in">
     <div class="tx"><span class="kick">${started?'繼續閱讀':'最新加入'}</span><h1>${esc(b.title)}</h1>
       <div class="meta">${b.author?`<span>${esc(b.author)}</span>`:''}${b.category?`<span>${esc(b.category)}</span>`:''}${b.pages?`<span>${b.pages} 頁</span>`:''}${(b.tags||[]).map(t=>`<span>#${esc(t)}</span>`).join('')}${b.notes?`<span>✎ ${b.notes} 則筆記</span>`:''}${aiTag(b)}</div>
       ${started&&b.pages?`<div class="pg"><div class="bar"><i style="width:${Math.round(prog(b)*100)}%"></i></div><span>第 ${b.lastPage+1} / ${b.pages} 頁</span></div>`:''}
       <div class="btns"><button type="button" class="primary" data-open="${b.id}">${IC.play}${started?'繼續閱讀':'開始閱讀'}</button><button type="button" class="sec" data-edit="${b.id}">${IC.more}詳細資料</button></div></div>
-    <div class="poster" data-open="${b.id}" role="button" tabindex="-1" aria-hidden="true"><img src="${coverUrl(b)}" alt="" onerror="this.remove()"></div></div></div>`; }
+    <div class="poster" data-open="${b.id}" role="button" tabindex="-1" aria-hidden="true">${designCover(b)}${coverImg(b)}</div></div></div>`; }
 function renderLib(soft){
   pollLib(); renderMenu(); document.querySelectorAll('.top [data-view]').forEach(b=>{ b.classList.toggle('on',b.dataset.view===VIEW); b.setAttribute('aria-pressed',String(b.dataset.view===VIEW)); });
   const q=$('q').value.trim().toLowerCase(), el=$('vLib');
@@ -403,7 +417,7 @@ function renderLib(soft){
   el.querySelectorAll('.track').forEach(arrows);
 }
 function listHtml(L){ return `<table class="list"><colgroup><col><col class="hm" style="width:16%"><col style="width:12%"><col class="hm" style="width:9%"><col style="width:9%"><col class="hm" style="width:12%"><col style="width:44px"></colgroup><thead><tr><th>書名</th><th class="hm">作者</th><th>分類</th><th class="hm">狀態</th><th>進度</th><th class="hm">筆記</th><th></th></tr></thead><tbody>${L.map(b=>`<tr class="r" data-open="${b.id}" draggable="true" data-drag="${b.id}">
-  <td><span class="lt"><span class="th"><img src="${coverUrl(b)}" alt="" loading="lazy" onerror="this.remove()"></span><span><b>${b.favorite?'★ ':''}${esc(b.title)}</b> ${aiTag(b)}</span></span></td><td class="hm">${esc(b.author||'—')}</td><td>${b.category?`<span class="pill">${esc(b.category)}</span>`:'<span class="note">—</span>'}</td>
+  <td><span class="lt"><span class="th" style="background:hsl(${hueOf(b.title)} 45% 42%)">${coverImg(b,1)}</span><span><b>${b.favorite?'★ ':''}${esc(b.title)}</b> ${aiTag(b)}</span></span></td><td class="hm">${esc(b.author||'—')}</td><td>${b.category?`<span class="pill">${esc(b.category)}</span>`:'<span class="note">—</span>'}</td>
   <td class="hm">${STATUS[b.status]||''}</td><td class="mono">${b.pages?`${b.lastPage+1}/${b.pages}`:'—'}</td><td class="mono hm">${b.notes||0} 則・${b.marks||0} 處</td>
   <td style="width:36px"><button type="button" class="ib ghost" data-edit="${b.id}" title="詳細資料" aria-label="詳細資料 ${esc(b.title)}">${IC.more}</button></td></tr>`).join('')}</tbody></table>`; }
 function arrows(t){ const s=t.parentNode, l=s.querySelector('.arr.l'), r=s.querySelector('.arr.r'); if(!l) return;
@@ -476,6 +490,11 @@ function openSettings(){
 function editBook(id){
   const b=LIB.books.find(x=>x.id===id); if(!b) return; const d=$('dlg');
   d.innerHTML=`<form method="dialog" id="edF"><h2>編輯書籍資料</h2>
+    <div class="cvedit"><div class="pc" style="width:96px;pointer-events:none"><div class="po" id="eCv">${designCover(b)}${coverImg(b)}</div></div>
+      <div class="fld" style="flex:1;margin:0"><span class="label">封面</span>
+        <label class="filebtn small">上傳圖片<input type="file" id="eCvF" accept="image/*"></label>
+        <span class="row" style="gap:4px"><button type="button" class="small" id="eCvP">用 PDF 第</button><input type="number" id="eCvN" min="1" max="${b.pages||1}" value="1" aria-label="頁碼" style="width:58px;min-height:28px;padding:2px 6px;font-size:12px"><span class="note">頁</span></span>
+        <button type="button" class="small" id="eCvD"${hasCover(b)?'':' disabled'}>用書名封面</button></div></div>
     <div class="fld"><label class="label" for="eT">書名</label><input type="text" id="eT" value="${esc(b.title)}" required></div>
     <div class="fld"><label class="label" for="eA">作者</label><input type="text" id="eA" value="${esc(b.author)}"></div>
     <div class="row" style="gap:10px"><div class="fld grow"><label class="label" for="eC">分類</label><select id="eC"><option value="">未分類</option>${LIB.categories.map(c=>`<option${c===b.category?' selected':''}>${esc(c)}</option>`).join('')}</select></div>
@@ -485,6 +504,13 @@ function editBook(id){
     ${b.hasText?`<div class="row" style="margin-bottom:16px"><button type="button" class="small" id="eAi"${['running','queued'].includes((b.ai||{}).status)?' disabled':''}>用 AI 重新整理段落</button>${aiTag(b)}<span class="note">畫過螢光筆或翻譯過的頁不會動</span></div>`:''}
     <div class="row" style="justify-content:space-between"><button type="button" class="danger" id="eDel">刪除這本書</button><span class="row"><button type="button" id="eNo">取消</button><button class="primary" value="ok">儲存</button></span></div></form>`;
   d.showModal(); $('eNo').onclick=()=>d.close();
+  const setCv=async(req)=>{ try{ toast('<span class="spin"></span>更新封面…',0); Object.assign(b,await req); $('eCv').innerHTML=designCover(b)+coverImg(b); $('eCvD').disabled=!hasCover(b); renderLib(true); toast('封面已更新'); }catch(e){ toast('封面更新失敗：'+esc(e.message),5000); } };
+  $('eCvF').onchange=async e=>{ const f=e.target.files[0]; if(!f) return; const img=new Image(); img.src=URL.createObjectURL(f); try{ await img.decode(); }catch(err){ return toast('讀不到這張圖'); }
+    const c=document.createElement('canvas'), sc=Math.min(1,720/img.naturalWidth); c.width=img.naturalWidth*sc; c.height=img.naturalHeight*sc; const g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height); g.drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(img.src);
+    setCv(new Promise(r=>c.toBlob(r,'image/jpeg',.86)).then(bl=>api.put(`/api/books/${id}/cover`,bl,true))); };
+  $('eCvP').onclick=()=>setCv((async()=>{ const pdf=await pdfjsLib.getDocument(`/books/${id}/book.pdf`).promise; try{ const n=Math.max(1,Math.min(pdf.numPages,$('eCvN').value|0)), pg=await pdf.getPage(n), v0=pg.getViewport({scale:1}), vp=pg.getViewport({scale:480/v0.width});
+    const c=document.createElement('canvas'); c.width=vp.width; c.height=vp.height; await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise; const bl=await new Promise(r=>c.toBlob(r,'image/jpeg',.84)); return api.put(`/api/books/${id}/cover`,bl,true); } finally{ pdf.destroy(); } })());
+  $('eCvD').onclick=()=>setCv(api.del(`/api/books/${id}/cover`));
   if($('eAi')) $('eAi').onclick=async()=>{ try{ Object.assign(b,await api.post(`/api/books/${id}/ai`,{restart:true})); d.close(); renderLib(); toast('AI 開始整理《'+esc(b.title)+'》'); }catch(e){ toast(esc(e.message),5000); } };
   $('eDel').onclick=async()=>{ if(!confirm(`確定刪除《${b.title}》？\nPDF、螢光筆、筆記、翻譯都會一起刪掉，不能復原。`)) return; await api.del(`/api/books/${id}`); d.close(); LIB.books=LIB.books.filter(x=>x.id!==id); renderLib(); toast('已刪除'); };
   $('edF').onsubmit=async e=>{ e.preventDefault(); const u=await api.patch(`/api/books/${id}`,{title:$('eT').value,author:$('eA').value,category:$('eC').value,status:$('eS').value,favorite:$('eF').checked,tags:$('eG').value.split(/[,，]/)});
@@ -536,9 +562,10 @@ async function importFiles(files){
         const pg=await pdf.getPage(i); const tc=await pg.getTextContent(); pages.push(parasOf(linesOf(tc.items))); pg.cleanup(); }
       let info={}; try{ info=(await pdf.getMetadata()).info||{}; }catch(e){}
       const useAi=LS.get('aiParse',true); const patch={}; if(info.Author) patch.author=info.Author; if(!useAi&&info.Title&&info.Title.length>3&&!/^(untitled|microsoft word|document)/i.test(info.Title)) patch.title=info.Title.replace(/\.pdf$/i,'').trim();
-      // 封面：第一頁縮圖
-      try{ const p1=await pdf.getPage(1), vp0=p1.getViewport({scale:1}), vp=p1.getViewport({scale:360/vp0.width}); const c=document.createElement('canvas'); c.width=vp.width; c.height=vp.height;
-        await p1.render({canvasContext:c.getContext('2d'),viewport:vp}).promise; const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.82)); await api.put(`/api/books/${meta.id}/cover`,blob,true); }catch(e){ console.warn('cover',e); }
+      // 封面：第一頁文字很少（像真正的封面）才拿來當封面；滿滿文字的就用設計好的封面（書名＋作者）
+      const p1chars=(pages[0]||[]).join('').length;
+      if(p1chars<300) try{ const p1=await pdf.getPage(1), vp0=p1.getViewport({scale:1}), vp=p1.getViewport({scale:360/vp0.width}); const c=document.createElement('canvas'); c.width=vp.width; c.height=vp.height;
+        await p1.render({canvasContext:c.getContext('2d'),viewport:vp}).promise; const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.82)); Object.assign(meta,await api.put(`/api/books/${meta.id}/cover`,blob,true)); }catch(e){ console.warn('cover',e); }
       const m2=await api.put(`/api/books/${meta.id}/pages`,{pages});
       Object.assign(meta,m2); if(Object.keys(patch).length) Object.assign(meta,await api.patch(`/api/books/${meta.id}`,patch));
       if(useAi&&meta.hasText){ try{ Object.assign(meta,await api.post(`/api/books/${meta.id}/ai`,{})); }catch(e){ console.warn('ai',e); } }

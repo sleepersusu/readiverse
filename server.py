@@ -1058,13 +1058,17 @@ def restore_missing(items, raw_paras, near_items, repeats=frozenset()):
         return bi if best >= 2 else -1
     for ri, r in enumerate(raw_paras):
         if not is_text(r): continue
-        ws = _wds(r)
-        if len(ws) < 8 or sum(c.isalpha() for c in r) < 0.6 * len(r.replace(' ', '')): continue      # 太短、不像句子（頁碼、圖裡的字）
+        ws = _wds(r); rq = _sq(r)
+        short_talk = len(ws) < 8 and re.match(r'^["“‘].*["”’]$', rq) and len(ws) >= 1      # 很短的對話（「"Indeed!"」）
+        if short_talk:
+            alltxt = ' '.join(_sq(x) for x in list(out) + list(near_items) if is_text(x))
+            if rq in alltxt: continue
+        elif len(ws) < 8 or sum(c.isalpha() for c in r) < 0.6 * len(r.replace(' ', '')): continue      # 太短、不像句子（頁碼、圖裡的字）
         if re.sub(r'[^a-z]', '', r.lower()) in repeats: continue                                     # 每頁都有的頁首、版權聲明
         L = [c for c in r if c.isalpha()]
         if L and sum(c.isupper() for c in L) > 0.6 * len(L): continue                                 # 全大寫：頁首、章名頁的裝飾字
         if has_fig and (len(ws) < 15 or not re.search(r'[.!?]["”’)]?$', r.strip())): continue      # 有圖的頁：只補像正文的長段落
-        if cover(r) >= 0.4: continue
+        if not short_talk and cover(r) >= 0.4: continue
         pos = len(out)                      # 放在：後面第一個 Docling 有的段落前面；找不到就放在前一段後面
         for r2 in raw_paras[ri + 1:]:
             if is_text(r2) and cover(r2) >= 0.6:
@@ -1092,18 +1096,20 @@ def split_by_raw(pages, raw, i, frozen=()):
     for q in (i, i + 1):
         if q < len(raw) and q not in frozen:
             for r in raw[q] or []:
-                if is_text(r) and len(_wds(r)) >= 4: starts.append((_sq(r)[:32], q))
+                if is_text(r) and (len(_wds(r)) >= 4 or (re.match(r'^["“‘]', _sq(r)) and len(_sq(r)) >= 4)):     # 對話：短到「"No."」也是一段
+                    starts.append((_sq(r)[:32], q))
     if not starts: return 0
     cuts = 0; out = []
+    dn = lambda z: re.sub(r'[—–]', '-', z)            # 比對時破折號、連字號當成一樣（長度不變，位置對得上）
     for x in pages[i]:
         if not is_text(x): out.append((x, i)); continue
-        t = _sq(x); pos = []
+        t = _sq(x); tn = dn(t); pos = []
         for key, q in starts:
-            k = t.find(key, 1)
+            key = dn(key); k = tn.find(key, 1)
             while k > 0:
                 if re.search(r'[.!?:;"”’)\]]\s$', t[max(0, k - 3):k]) or t[k - 1:k] == ' ' and re.search(r'[.!?"”’)]$', t[:k].rstrip()):
                     pos.append((k, q)); break
-                k = t.find(key, k + 1)
+                k = tn.find(key, k + 1)
         if not pos: out.append((x, i)); continue
         pos = sorted(set(pos)); prev = 0; src = i
         for k, q in pos:
@@ -1150,15 +1156,15 @@ def move_trailing_headings(pages, frozen=()):
 
 
 def dedupe_page(items):
-    """同一頁裡一模一樣的段落只留第一個（分段、跨頁搬動之後可能出現兩份）"""
+    """同一頁裡一模一樣的段落只留最後一份（前面那份通常是從上一頁搬過來、位置不對的）"""
     seen, out = set(), []
-    for x in items:
+    for x in reversed(items):
         if is_text(x):
-            k = _sq(x)
-            if len(k) > 30 and k in seen: continue
+            k = ' '.join(_wds(x))                       # 只比字（破折號、引號寫法不同也算同一段）
+            if (len(k) > 30 or re.match(r'^["“‘]', _sq(x))) and k in seen: continue
             seen.add(k)
         out.append(x)
-    return out
+    return out[::-1]
 
 
 def restore_headings(items, raw_paras, near_items, repeats=frozenset()):

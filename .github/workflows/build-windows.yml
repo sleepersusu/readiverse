@@ -106,10 +106,10 @@ jobs:
         shell: bash
         run: |
           TAG="${{ github.ref_name }}"
-          PREV=$(git tag -l 'v*' --merged "$TAG" --sort=-v:refname | grep -vx "$TAG" | head -1)
+          PREV=$(git tag -l 'v*' --merged "$TAG" --sort=-v:refname | grep -vx "$TAG" | head -1 || true)   # 第一版沒有上一個版號
           {
             echo "## 這一版更新了什麼"; echo
-            git log --no-merges --format='- %s' ${PREV:+$PREV..}"$TAG" | head -60
+            git log --no-merges --format='- %s' ${PREV:+$PREV..}"$TAG" | head -60 || true
             echo; echo "Windows：下載 Readiverse-Setup.exe，點兩下安裝。出現藍色的「Windows 已保護您的電腦」，按「其他資訊 → 仍要執行」。"
           } > notes.md
           cat notes.md

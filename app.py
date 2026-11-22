@@ -13,6 +13,7 @@ PORT = int(os.environ.get('READIVERSE_PORT') or 8780)
 BASE = 'http://localhost:%d' % PORT
 HOME = os.path.expanduser('~/.readiverse')
 os.makedirs(HOME, exist_ok=True)
+if getattr(sys, 'frozen', False): os.environ['READIVERSE_EXE'] = os.path.abspath(sys.executable)   # 自動更新用：知道要換掉哪一個程式
 
 
 def ping():

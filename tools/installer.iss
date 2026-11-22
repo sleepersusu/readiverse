@@ -53,9 +53,37 @@ Name: "{autoprograms}\Readiverse"; Filename: "{app}\Readiverse.exe"
 Name: "{autodesktop}\Readiverse"; Filename: "{app}\Readiverse.exe"; Tasks: desktopicon
 
 [Run]
+; 裝完直接打開（自動更新的安靜模式也會打開）
 Filename: "{app}\Readiverse.exe"; Description: "打開 Readiverse"; Flags: nowait postinstall
 
 [Code]
+function OpenProcess(dwDesiredAccess: Cardinal; bInheritHandle: Boolean; dwProcessId: Cardinal): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function WaitForSingleObject(hHandle: THandle; dwMilliseconds: Cardinal): Cardinal;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseHandle(hObject: THandle): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+{ 自動更新：Readiverse 帶 /WAITPID=程式編號 叫起安裝程式，先等舊的 Readiverse 完全關掉（最多 2 分鐘）再開始裝 }
+function InitializeSetup(): Boolean;
+var
+  Pid: Integer;
+  H: THandle;
+begin
+  Pid := StrToIntDef(ExpandConstant('{param:WAITPID|0}'), 0);
+  if Pid > 0 then
+  begin
+    H := OpenProcess($00100000, False, Pid);
+    if H <> 0 then
+    begin
+      WaitForSingleObject(H, 120000);
+      CloseHandle(H);
+    end;
+    Sleep(1500);
+  end;
+  Result := True;
+end;
+
 { 選安裝位置：Program Files 之類需要管理員權限的地方不行 }
 function NextButtonClick(CurPageID: Integer): Boolean;
 var

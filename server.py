@@ -12,7 +12,7 @@
   <書的 id>/pages.json   每一頁的英文段落 [[段落, 段落…], …]（AI 整理過的會換掉）
   <書的 id>/state.json   螢光筆、筆記、中文翻譯
 """
-import json, os, re, shutil, subprocess, sys, threading, time, uuid, webbrowser, queue, glob
+import json, os, re, shutil, subprocess, sys, threading, time, uuid, webbrowser, queue, glob, urllib.request
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
 import rv_dict
@@ -654,7 +654,7 @@ def apply_proof(pages, pno, j, frozen):
     return applied, failed
 
 
-def proof_page(bid, pno, imgdir):
+def proof_page(bid, pno, imgdir, kind='best'):
     """校對一頁（pno 從 0 開始）。回傳這頁的紀錄"""
     d = os.path.join(LIB, bid)
     with LOCK:
@@ -668,7 +668,7 @@ def proof_page(bid, pno, imgdir):
     payload = json.dumps({'prev_tail': prev[-200:], 'paras': {str(i): t for i, t in enumerate(paras)}}, ensure_ascii=False)
     c = claude_path()
     if not c: raise RuntimeError('找不到 Claude Code')
-    r = subprocess.run([*claude_argv(c), '-p', '--model', ai_model('best'), '--allowedTools', 'Read', '--add-dir', imgdir, '--', PROOF_PROMPT % (img, payload)],
+    r = subprocess.run([*claude_argv(c), '-p', '--model', ai_model(kind), '--allowedTools', 'Read', '--add-dir', imgdir, '--', PROOF_PROMPT % (img, payload)],
                        capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
     m = re.search(r'\{[\s\S]*\}', r.stdout or '')
     if r.returncode != 0 or not m:
@@ -702,15 +702,17 @@ def proof_worker():
             with LOCK: PROOF_ACTIVE.discard(bid)
 
 
-PROOF_EVERY = 5      # 抽樣：每 5 頁校對 1 頁；有問題的頁再往前後各 2 頁檢查
+PROOF_EVERY = 3      # Sonnet 抽查：每 3 頁 1 頁；有問題的頁再往前後各 2 頁檢查
 PROOF_NEAR = 2
+PROOF_FILES = {'fast': 'proof_fast.json', 'best': 'proof.json'}
 
 
 def proof_job(bid):
-    """AI 校對（抽樣）：
-    1. 每 5 頁抽 1 頁，加上程式覺得可疑的頁（辨識到的字沒出現在段落裡、亂碼分數高）
-    2. 抽到的頁有修正（或修不了的地方），就把前後各 2 頁也校對
-    已經校對過的頁不會重做（關掉 App 再開會接著做）"""
+    """AI 校對兩輪（跟原書的頁面圖逐字對照）：
+    1. Haiku（快、便宜）：每一頁都校對一次
+    2. Sonnet（最仔細）：每 3 頁抽 1 頁，加上可疑的頁（漏字、亂碼、Haiku 有修不了的地方）；
+       抽到的頁 Sonnet 還找得到問題，就把前後各 2 頁也用 Sonnet 校對
+    校對過的頁不會重做（關掉 App 再開會接著做）"""
     from concurrent.futures import ThreadPoolExecutor
     d = os.path.join(LIB, bid)
     with LOCK:
@@ -718,49 +720,63 @@ def proof_job(bid):
     textp = [i for i, pg in enumerate(pages) if any(is_text(x) for x in pg)]
     if not textp: update_book(bid, proof={'status': 'done', 'done': 0, 'total': 0, 'fixed': 0}); return
     TP = set(textp)
-    lost = read_json(os.path.join(d, 'lost.json'), {}) or {}
-    flagged = {int(k) - 1 for k in lost if str(k).isdigit()} | set(bad_pages(pages))
-    seeds = set(textp[::PROOF_EVERY]) | (flagged & TP); plan = set(seeds)
-    checked = lambda: {int(k) - 1 for k, v in (read_json(os.path.join(d, 'proof.json'), {}) or {}).items() if (v or {}).get('t')}
+    recs = lambda kind: read_json(os.path.join(d, PROOF_FILES[kind]), {}) or {}
+    checked = lambda kind: {int(k) - 1 for k, v in recs(kind).items() if str(k).isdigit() and (v or {}).get('t')}
     def issues(v): return bool([a for a in (v or {}).get('applied') or [] if not a.get('already')] or (v or {}).get('failed'))
     stop = [None]
-    def run_round(todo):
+    def run_round(todo, kind, workers):
         imgdir = render_pages(bid, [i + 1 for i in todo])
         def one(i):
             if stop[0]: return
-            try: r = proof_page(bid, i, imgdir)
+            try: r = proof_page(bid, i, imgdir, kind)
             except RuntimeError as e: stop[0] = str(e); return
             if r is None: return
             with LOCK:
-                rr = read_json(os.path.join(d, 'proof.json'), {}) or {}; rr[str(i + 1)] = r; write_json(os.path.join(d, 'proof.json'), rr)
+                fn = os.path.join(d, PROOF_FILES[kind]); rr = read_json(fn, {}) or {}; rr[str(i + 1)] = r; write_json(fn, rr)
                 b = find_book(load_index(), bid); pr = dict((b or {}).get('proof') or {})
                 pr['done'] = pr.get('done', 0) + 1; pr['rev'] = int(time.time() * 1000)
                 update_book(bid, proof=pr)
-        with ThreadPoolExecutor(max_workers=2) as ex:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
             list(ex.map(one, sorted(todo)))
+    # 第 1 輪：Haiku 每一頁（Sonnet 已經看過的頁就不用）
+    best_done = checked('best')
+    want = [i for i in textp if i not in best_done]
+    todo = sorted(set(want) - checked('fast'))
+    if todo:
+        update_book(bid, proof={'status': 'running', 'phase': 'fast', 'done': len(want) - len(todo), 'total': len(want)})
+        run_round(todo, 'fast', 3)
+    if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
+    # 第 2 輪：Sonnet 抽查
+    lost = read_json(os.path.join(d, 'lost.json'), {}) or {}
+    with LOCK: pages = read_json(os.path.join(d, 'pages.json')) or []
+    flagged = {int(k) - 1 for k in lost if str(k).isdigit()} | set(bad_pages(pages))
+    flagged |= {int(k) - 1 for k, v in recs('fast').items() if str(k).isdigit() and (v or {}).get('failed')}
+    seeds = set(textp[::PROOF_EVERY]) | (flagged & TP); plan = set(seeds)
     while True:
-        rr = read_json(os.path.join(d, 'proof.json'), {}) or {}
-        done_set = checked()
-        for k, v in rr.items():                                         # 有問題的頁：前後各 2 頁也要看
-            if str(k).isdigit() and int(k) - 1 in seeds and issues(v):        # 只從抽樣的頁往外擴（不會一路擴到整本）
+        done_set = checked('best')
+        for k, v in recs('best').items():                               # Sonnet 在抽查的頁還找到問題：前後各 2 頁也要看
+            if str(k).isdigit() and int(k) - 1 in seeds and issues(v):
                 i = int(k) - 1; plan |= {j for j in range(i - PROOF_NEAR, i + PROOF_NEAR + 1) if j in TP}
         todo = sorted(plan - done_set)
-        update_book(bid, proof={'status': 'running', 'done': len(plan & done_set), 'total': len(plan), 'sampled': True})
+        update_book(bid, proof={'status': 'running', 'phase': 'best', 'done': len(plan & done_set), 'total': len(plan)})
         if not todo or stop[0]: break
-        run_round(todo)
+        run_round(todo, 'best', 2)
     total = len(plan)
-    if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300], 'done': len(plan & checked()), 'total': total}); return
+    if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
+    fixed = 0
     with LOCK:                                                              # 之前沒套上的修正再套一次（不用再問 AI）
-        rr = read_json(os.path.join(d, 'proof.json'), {}) or {}
         pages = read_json(os.path.join(d, 'pages.json')) or []
-        frozen = used_pages(read_json(os.path.join(d, 'state.json'), {})); ch = False
-        for k, v in rr.items():
-            F = (v or {}).get('failed') or []
-            if not F or not k.isdigit() or int(k) - 1 >= len(pages): continue
-            ap, fl = apply_proof(pages, int(k) - 1, {'fixes': [f for f in F if 'find' in f], 'inserts': [f for f in F if 'after' in f]}, frozen)
-            if ap: v['applied'] = (v.get('applied') or []) + ap; v['failed'] = fl; ch = True
-        if ch: write_json(os.path.join(d, 'pages.json'), pages); write_json(os.path.join(d, 'proof.json'), rr)
-    fixed = sum(len(v.get('applied') or []) for v in rr.values() if isinstance(v, dict))
+        frozen = used_pages(read_json(os.path.join(d, 'state.json'), {})); chp = False
+        for kind in ('fast', 'best'):
+            fn = os.path.join(d, PROOF_FILES[kind]); rr = read_json(fn, {}) or {}; ch = False
+            for k, v in rr.items():
+                F = (v or {}).get('failed') or []
+                if not F or not k.isdigit() or int(k) - 1 >= len(pages): continue
+                ap, fl = apply_proof(pages, int(k) - 1, {'fixes': [f for f in F if 'find' in f], 'inserts': [f for f in F if 'after' in f]}, frozen)
+                if ap: v['applied'] = (v.get('applied') or []) + ap; v['failed'] = fl; ch = chp = True
+            if ch: write_json(fn, rr)
+            fixed += sum(len([a for a in v.get('applied') or [] if not a.get('already')]) for v in rr.values() if isinstance(v, dict))
+        if chp: write_json(os.path.join(d, 'pages.json'), pages)
     with LOCK:
         pages = read_json(os.path.join(d, 'pages.json')) or []
     update_book(bid, proof={'status': 'done', 'done': total, 'total': total, 'fixed': fixed, 'rev': int(time.time() * 1000)}, ocrBad=bad_pages(pages))
@@ -913,7 +929,8 @@ def parse_job(bid):
         b = update_book(bid, parse={'status': 'done', 'next': total, 'total': total, 'rev': int(time.time() * 1000)},
                         hasText=sum(len(page_text(pg)) for pg in pages) > 40)
     if b and claude_path() and (read_json(CONFIG, {}) or {}).get('proof', True):
-        with LOCK: write_json(os.path.join(d, 'proof.json'), {})       # 重新解析過：整本重新校對
+        with LOCK:                                                      # 重新解析過：整本重新校對（兩輪都重來）
+            for fn in PROOF_FILES.values(): write_json(os.path.join(d, fn), {})
         update_book(bid, proof={'status': 'queued', 'done': 0, 'total': total})  # 記下來：App 關掉再開也會接著校對
         PROOFQ.put(bid)                                                 # AI 逐頁對照原書校對
     elif b and b.get('scanned'): QQ.put(bid)                            # 沒有 Claude：至少檢查亂碼頁
@@ -1111,6 +1128,19 @@ class H(BaseHTTPRequestHandler):
         if p == ['ielts-import'] and m == 'POST':
             try: return self.send(200, rv_dict.ielts_import())
             except ValueError as e: return self.err(404, str(e))
+        if p == ['update'] and m == 'GET':
+            if upd_can() and not UPD['stage']: upd_check(force=(qs.get('force') or [''])[0] == '1')
+            return self.send(200, upd_info())
+        if p == ['update'] and m == 'POST':
+            with UPD_LOCK:
+                if not upd_can(): return self.err(400, '只有下載安裝的 Readiverse 可以自動更新')
+                if UPD['stage'] and time.time() - UPD.get('ts', 0) > 90: UPD['stage'] = ''      # 上一次卡住了：重來
+                if not UPD['stage']:
+                    upd_check(force=True)
+                    if not upd_info()['available']: return self.send(200, upd_info())
+                    UPD.update(stage='download', ts=time.time())
+                    threading.Thread(target=upd_run, daemon=True).start()
+            return self.send(200, upd_info())
         if p == ['caps'] and m == 'GET':
             return self.send(200, {'docling': DOCLING, 'claude': bool(claude_path()), 'proof': (read_json(CONFIG, {}) or {}).get('proof', True), 'models': AI_MODELS, 'aiModels': {k: ai_model(k) for k in AI_DEFAULT}})
         if p == ['ai', 'auth'] and m == 'GET':
@@ -1226,7 +1256,8 @@ class H(BaseHTTPRequestHandler):
                 b = update_book(bid, ai={'status': 'queued'}); AIQ.put(bid)
                 return self.send(200, b)
             if sub == 'proof' and m == 'POST':       # 重新校對整本
-                if self.body_json().get('restart'): write_json(os.path.join(d, 'proof.json'), {})
+                if self.body_json().get('restart'):
+                    for fn in PROOF_FILES.values(): write_json(os.path.join(d, fn), {})
                 b = update_book(bid, proof={'status': 'queued', 'done': 0, 'total': b.get('pages') or 0}); PROOFQ.put(bid)
                 return self.send(200, b)
             if sub == 'ai-page' and m == 'POST':     # 用 AI 整理某一頁
@@ -1275,6 +1306,167 @@ class H(BaseHTTPRequestHandler):
 
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = route
 
+# ---------- 版本與自動更新（跟雅思練習室一樣；只有下載的 exe / app 版會自動更新）----------
+UPD_REPO = 'sleepersusu/readiverse'
+EXE = os.environ.get('READIVERSE_EXE', '')          # 打包版由 app.py 設定：執行檔路徑
+
+
+def _read_ver():
+    for d in (ROOT, os.path.dirname(EXE) if EXE else ''):
+        try:
+            with open(os.path.join(d, 'VERSION'), encoding='utf-8-sig') as f: return f.read().strip()
+        except Exception: pass
+    return ''
+
+
+VERSION = _read_ver()                                # 例如 v0.2.0；自己電腦打包的是 v0.2.0-dev（不自動更新）
+UPD = {'stage': '', 'got': 0, 'total': 0, 'error': '', 'checked': 0, 'latest': '', 'asset': '', 'size': 0, 'notes': [], 'ts': 0}
+UPD_LOCK = threading.Lock()
+
+
+def _vt(v):
+    try: return tuple(int(x) for x in str(v).lstrip('vV').split('.'))
+    except Exception: return None
+
+
+def _upd_asset():
+    if WIN: return 'Readiverse-Setup.exe'            # Windows：下載安裝程式，安靜模式安裝
+    if sys.platform == 'darwin': return 'Readiverse-mac.zip'
+    return ''
+
+
+def _mac_app():
+    p = os.path.abspath(EXE)
+    for _ in range(3): p = os.path.dirname(p)
+    return p if p.endswith('.app') else ''
+
+
+def upd_can():
+    if not EXE or not _upd_asset() or _vt(VERSION) is None: return False     # 原始碼版、自己打包的開發版：不自動更新
+    if sys.platform == 'darwin':
+        a = _mac_app()
+        return bool(a) and '/AppTranslocation/' not in a   # 沒拖到「應用程式」、直接從下載執行：macOS 放在唯讀的暫存位置，換不了
+    return True
+
+
+def _gh(url):
+    req = urllib.request.Request(url, headers={'User-Agent': 'readiverse', 'Accept': 'application/vnd.github+json'})
+    with urllib.request.urlopen(req, timeout=10) as r: return json.loads(r.read())
+
+
+def upd_check(force=False):
+    s = UPD
+    if not upd_can(): return
+    if not force and time.time() - s['checked'] < 600: return
+    s['checked'] = time.time()
+    try:
+        rels = [r for r in _gh('https://api.github.com/repos/%s/releases?per_page=30' % UPD_REPO) if not r.get('draft') and not r.get('prerelease')]
+        name = _upd_asset(); best = None
+        for r in rels:                                # 最新的、而且有這個平台安裝檔的版本
+            a = next((x for x in r.get('assets', []) if x.get('name') == name), None)
+            if a and _vt(r.get('tag_name')) and (not best or _vt(r['tag_name']) > _vt(best[0]['tag_name'])): best = (r, a)
+        if not best: s.update(latest='', asset='', size=0, notes=[]); return
+        r, a = best; cur = _vt(VERSION)
+        s.update(latest=r['tag_name'], asset=a['browser_download_url'], size=a.get('size', 0))
+        notes = []                                    # 跳過好幾版才更新：中間每一版的更新內容都列出來
+        for rr in sorted(rels, key=lambda x: _vt(x.get('tag_name')) or (), reverse=True):
+            tv = _vt(rr.get('tag_name'))
+            if tv and (cur is None or tv > cur):
+                notes += [l[2:].strip() for l in str(rr.get('body') or '').splitlines() if l.startswith('- ')]
+        s['notes'] = list(dict.fromkeys(n for n in notes if n))[:60]
+    except Exception as e:
+        print('檢查更新失敗：', e)
+
+
+def upd_info():
+    s = UPD; cur, lat = _vt(VERSION), _vt(s['latest'])
+    avail = bool(s['asset'] and lat and cur and lat > cur)
+    return {'can': upd_can(), 'current': VERSION, 'latest': s['latest'], 'available': avail, 'stage': s['stage'],
+            'pct': int(s['got'] * 100 / s['total']) if s['total'] else 0, 'error': s['error'], 'notes': s['notes'],
+            'repo': UPD_REPO}
+
+
+def upd_loop():
+    """App 開著的時候：每 30 分鐘看一次有沒有新版"""
+    time.sleep(15)
+    while True:
+        try:
+            if upd_can() and not UPD['stage']: upd_check(force=True)
+        except Exception as e: print('檢查更新失敗：', e)
+        time.sleep(1800)
+
+
+def upd_log(m):
+    try:
+        with open(os.path.join(HOME_DIR, 'update.log'), 'a', encoding='utf-8') as f: f.write(time.strftime('%Y-%m-%d %H:%M:%S') + '  ' + m + '\n')
+    except Exception: pass
+
+
+def upd_run():
+    """下載新版 → 交給安裝程式／小程式：等 Readiverse 關掉、換成新版、再打開 → 關掉 Readiverse
+    書庫和設定都不在程式資料夾裡，更新不會動到；做到一半的解析、校對，新版打開會接著做"""
+    import tempfile, zipfile
+    s = UPD
+    try:
+        upd_log('從 %s 更新到 %s：開始下載' % (VERSION or '?', s.get('latest') or '?'))
+        os.makedirs(HOME_DIR, exist_ok=True)
+        tmp = tempfile.mkdtemp(prefix='readiverse-update-'); z = os.path.join(tmp, 'new.bin')
+        for attempt in range(3):                       # 網路斷掉就重新下載（最多 3 次），沒下載完整絕不安裝
+            s.update(stage='download', got=0, total=s['size'] or 0, error='', ts=time.time())
+            try:
+                req = urllib.request.Request(s['asset'], headers={'User-Agent': 'readiverse'})
+                with urllib.request.urlopen(req, timeout=30) as r, open(z, 'wb') as f:
+                    s['total'] = int(r.headers.get('Content-Length') or s['total'] or 0)
+                    while True:
+                        b = r.read(1 << 16)
+                        if not b: break
+                        f.write(b); s['got'] += len(b); s['ts'] = time.time()
+                if s['total'] and s['got'] != s['total']: raise RuntimeError('只下載到 %d / %d bytes' % (s['got'], s['total']))
+                if not WIN: zipfile.ZipFile(z).testzip()
+                break
+            except Exception as e:
+                upd_log('下載失敗（第 %d 次）：%s' % (attempt + 1, e))
+                if attempt == 2: raise RuntimeError('網路不穩，新版沒下載完整，請稍後再按一次更新')
+                time.sleep(3)
+        upd_log('下載完成（%d bytes）' % s['got'])
+        s['stage'] = 'install'; pid = os.getpid()
+        if WIN:
+            setup = os.path.join(tmp, 'Readiverse-Setup.exe'); os.replace(z, setup)
+            subprocess.Popen([setup, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/WAITPID=%d' % pid,
+                              '/LOG=' + os.path.join(HOME_DIR, 'install.log')], cwd=tmp,
+                             creationflags=0x00000008 | 0x00000200, close_fds=True)     # 跟 Readiverse 分開跑（DETACHED）
+        else:
+            app = _mac_app(); sh = os.path.join(tmp, 'update.sh'); os.replace(z, os.path.join(tmp, 'new.zip'))
+            qq = lambda x: "'" + x.replace("'", "'\\''") + "'"
+            with open(sh, 'w', encoding='utf-8') as f:
+                f.write("""#!/bin/bash
+exec >> %s 2>&1
+echo "$(date '+%%F %%T')  開始更新到 %s"
+while kill -0 %d 2>/dev/null; do sleep 1; done
+sleep 1
+APP=%s; TMP=%s
+ditto -x -k "$TMP/new.zip" "$TMP/new" || { open "$APP"; exit 1; }
+NEW=$(ls -d "$TMP"/new/*.app | head -1); [ -d "$NEW" ] || { open "$APP"; exit 1; }
+rm -rf "$APP.old"; mv "$APP" "$APP.old" || { open "$APP"; exit 1; }
+if ditto "$NEW" "$APP"; then rm -rf "$APP.old"; else rm -rf "$APP"; mv "$APP.old" "$APP"; fi
+xattr -cr "$APP" 2>/dev/null
+open "$APP" && echo "$(date '+%%F %%T')  已重新打開"
+rm -rf "$TMP"
+""" % (qq(os.path.join(HOME_DIR, 'update.log')), s.get('latest'), pid, qq(app), qq(tmp)))
+            os.chmod(sh, 0o755)
+            subprocess.Popen(['/bin/bash', sh], start_new_session=True, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        s['stage'] = 'restart'; s['ts'] = time.time()
+        upd_log('新版準備好了，Readiverse 關掉後會換成新版並重新打開')
+        def bye():
+            time.sleep(1.5)
+            with LOCK: os._exit(0)                     # 等正在寫的檔案寫完再關
+        threading.Thread(target=bye, daemon=True).start()
+    except Exception as e:
+        upd_log('更新失敗：%s' % e)
+        s.update(stage='', error='更新失敗：%s' % e)
+
+
 
 def main():
     if LIB == LOCAL_LIB and not os.path.exists(LOCAL_LIB) and os.path.isfile(os.path.join(OLD_LIB, '_index.json')):
@@ -1287,6 +1479,7 @@ def main():
     threading.Thread(target=quality_worker, daemon=True).start()
     for _ in range(2): threading.Thread(target=proof_worker, daemon=True).start()   # 兩本書同時校對（每本同時 2 頁）
     threading.Thread(target=docling_setup, daemon=True).start()
+    threading.Thread(target=upd_loop, daemon=True).start()
     with LOCK:                                   # 上次沒做完的：接著做
         for b in load_index()['books']:
             if (b.get('ai') or {}).get('status') in ('running', 'queued'): AIQ.put(b['id'])

@@ -457,6 +457,9 @@ dialog.setdlg form{display:flex;flex-direction:column;max-height:min(86vh,860px)
 .para.dvt .ptx{font-size:calc(var(--fs)*2.1);line-height:1.2;font-weight:500;letter-spacing:.01em}
 .para.lbl{text-align:center;margin:1.6em auto .1em!important}
 .para.lbl .ptx{text-indent:0!important;text-align:center;text-transform:uppercase;letter-spacing:.28em;font-weight:500!important;font-size:calc(var(--fs)*.95)!important;color:var(--pink)}
+.updpill{position:fixed;right:18px;bottom:18px;z-index:40;display:flex;align-items:center;gap:10px;flex-wrap:wrap;max-width:min(460px,calc(100vw - 36px));background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:10px 14px;font-size:13.5px}
+.updnotes{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--muted);max-height:180px;overflow:auto}
+#sVer .small{margin-left:6px}
 </style></head>
 <body>
 <div class="top">
@@ -478,6 +481,7 @@ dialog.setdlg form{display:flex;flex-direction:column;max-height:min(86vh,860px)
 
 <!-- ===== 書庫 ===== -->
 <section id="vLib"></section>
+<div id="updPill" class="updpill" hidden></div>
 
 <!-- ===== 閱讀 ===== -->
 <section id="vRead" hidden>
@@ -537,13 +541,38 @@ $('themeBtn').onclick=()=>setTheme(isDark()?'light':'dark');
    書庫
    ===================================================================== */
 let LIB={books:[],categories:[]}, FILTER=(f=>f==='all'?'home':f)(LS.get('filter2','home')), VIEW=LS.get('view2','grid'), SORT=LS.get('sort','opened');
-async function loadLib(){ await loadCaps(); LIB=await api.get('/api/library'); renderLib(); }
+async function loadLib(){ await loadCaps(); LIB=await api.get('/api/library'); renderLib(); checkUpdate(); }
+/* ---------- 版本與自動更新（跟雅思練習室一樣）---------- */
+let UPDI={}, updT=null;
+const updSp='<span class="spin"></span>';
+function updHtml(u,full){
+  if(u.stage==='download') return `${updSp}正在下載 ${esc(u.latest)}… ${u.pct||0}%`;
+  if(u.stage==='install'||u.stage==='restart') return `${updSp}換成 ${esc(u.latest)}，馬上自動重新打開…`;
+  if(u.available) return `有新版本 <b>${esc(u.latest)}</b>${full?`（目前 ${esc(u.current)}）`:''} <button type="button" class="small primary" data-upd-go>更新並重新打開</button>`+(full&&u.notes&&u.notes.length?`<ul class="updnotes">${u.notes.slice(0,12).map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:'');
+  return '';
+}
+async function checkUpdate(force){
+  try{ UPDI=await api.get('/api/update'+(force?'?force=1':'')); }catch(e){ return; }
+  const pill=$('updPill'); if(pill){ const h=UPDI.can?updHtml(UPDI,false):''; pill.hidden=!h||$('vLib').hidden; pill.innerHTML=h+(UPDI.error?`<span class="err">${esc(UPDI.error)}</span>`:''); }
+  const sv=$('sVer'); if(sv) sv.innerHTML=verHtml();
+  clearTimeout(updT); updT=setTimeout(()=>checkUpdate(),UPDI.stage?1000:30*60*1000);
+}
+function verHtml(){
+  const u=UPDI; if(!u.current) return '<span class="sd">開發版（從原始碼執行）</span>';
+  if(!u.can) return `<span class="sd">${esc(u.current)}${/-dev/.test(u.current)?'（自己電腦打包的開發版，不自動更新）':''}</span>`;
+  return (updHtml(u,true)||`<span class="sd">${esc(u.current)}，已經是最新版</span> <button type="button" class="small" data-upd-check>檢查更新</button>`)+(u.error?`<div class="err">${esc(u.error)}</div>`:'');
+}
+document.addEventListener('click',async e=>{
+  if(e.target.closest('[data-upd-check]')){ const b=e.target.closest('[data-upd-check]'); b.disabled=true; b.textContent='檢查中…'; await checkUpdate(true); return; }
+  const b=e.target.closest('[data-upd-go]'); if(!b) return;
+  if(!confirm(`下載 ${UPDI.latest} 並重新打開 Readiverse？\n書、筆記和收藏都不會動到；正在做的解析、校對，新版打開後會接著做。`)) return;
+  b.disabled=true; b.textContent='準備中…'; try{ UPDI=await api.post('/api/update',{}); }catch(err){ toast('更新失敗：'+esc(err.message)); } checkUpdate(); });
 const stTag=b=>`<span data-st="${b.id}">${aiTag(b)}</span>`;   // 背景處理的進度：只更新這一小塊，首頁不用整個重畫
 function aiTag(b){ const a=b.ai||{}, r=b.parse||{}, sp='<span class="spin"></span>';
   if(r.status==='running') return `<span class="aist" title="Docling 在背景解析版面：分段、圖片、表格">${sp}版面解析中${r.total?` ${Math.min(r.next||0,r.total)}/${r.total} 頁`:''}</span>`;
   if(r.status==='queued') return `<span class="aist">${sp}${CAPS.docling&&CAPS.docling.status==='installing'?'等 Docling 安裝好':'等待版面解析'}</span>`;
   if(a.status==='running'||a.status==='queued') return `<span class="aist">${sp}AI 判斷書名、分類中</span>`;
-  const pf=b.proof||{}; if(pf.status==='running'||pf.status==='queued') return `<span class="aist" title="Claude 逐頁對照原書，修正漏字和錯字">${sp}AI 校對中 ${pf.done||0}/${pf.total||0} 頁</span>`;
+  const pf=b.proof||{}; if(pf.status==='running'||pf.status==='queued') return `<span class="aist" title="${pf.phase==='best'?'Sonnet 每 3 頁抽查一頁，有問題再看前後各 2 頁':'Haiku 每一頁對照原書，修正漏字和錯字'}">${sp}${pf.phase==='best'?'AI 抽查中':'AI 校對中'} ${pf.done||0}/${pf.total||0} 頁</span>`;
   if(pf.status==='error') return `<span class="aist bad" title="${esc(pf.error||'')}">AI 校對中斷</span>`;
   const fx=b.fix||{}; if(fx.status==='running') return `<span class="aist" title="掃描書：AI 正在修正辨識錯字比較多的頁">${sp}AI 修正錯字中 ${fx.done||0}/${fx.total||0} 頁</span>`;
   if(r.status==='error') return `<span class="aist bad" title="${esc(r.error||'')}">版面解析失敗</span>`;
@@ -699,8 +728,8 @@ function openSettings(){
       </section>
       <section class="ssec"><h3>AI（Claude）</h3>
         <div class="srow"><div class="sl"><div class="st">Claude 帳號</div><div class="sd" id="aiStat"><span class="spin"></span>檢查登入狀態…</div><div id="aiLogin"></div><div id="aiRes"></div></div><div class="sc"><button type="button" id="aiLoginBtn" hidden>登入 Claude</button><button type="button" id="aiTest">測試</button></div></div>
-        ${row('校對、整理頁面','逐頁對照原書、修正漏字和錯字',modelSel('sMBest','best'))}
-        ${row('翻譯、書名、解釋','中文對照、判斷書名分類、單字解釋',modelSel('sMFast','fast'))}
+        ${row('抽查校對、整理頁面','每 3 頁抽 1 頁仔細對照原書，有問題再看前後各 2 頁',modelSel('sMBest','best'))}
+        ${row('逐頁校對、翻譯、書名','每一頁先對照原書校對一次；中文對照、判斷書名分類、單字解釋',modelSel('sMFast','fast'))}
         ${row('匯入後 AI 逐頁校對','Claude 看原書每一頁，修正漏字、錯字、標點（比較慢、花額度，但最準）',`<label class="sw-toggle"><input type="checkbox" id="sProof"${CAPS.proof!==false?' checked':''}><span></span></label>`)}
       </section>
       <section class="ssec"><h3>匯入與解析</h3>
@@ -709,6 +738,7 @@ function openSettings(){
       </section>
       <section class="ssec"><h3>分類</h3><div class="sd" style="margin:-4px 0 10px">直接改名字，書會跟著走；按 × 刪除</div><div id="sCats">${catRows}</div>
         <div class="catrow"><input type="text" id="sCatNew" placeholder="新分類的名字" maxlength="40" aria-label="新分類的名字"><button type="button" class="small" id="sCatAdd">＋ 新增</button></div></section>
+      <section class="ssec"><h3>版本</h3><div class="srow"><div class="sl"><div class="st">Readiverse</div><div class="sd" id="sVer">${verHtml()}</div></div></div></section>
       <section class="ssec"><h3>書庫位置</h3><div class="sd" style="margin:-4px 0 10px">放在 Google 雲端硬碟或 OneDrive，換電腦打開就是同一份書和筆記</div>
         <div class="stor" id="sStor"><span class="note"><span class="spin"></span>找雲端硬碟…</span></div></section>
     </div>
@@ -1075,8 +1105,12 @@ function paginate(keep){
       f.style.marginTop=Math.max(10,(avail-(tw*ih/iw)-ch)/2)+'px'; }                   // 上下置中
     else { const H=r.offsetHeight; if(H>avail) f.style.zoom=Math.max(0.3,(avail-8)/H); } });
   const U=[]; rows.forEach(r=>{ const H=r.offsetHeight; if(H<=avail||r.querySelector(':scope>.L>.fig')){ U.push({r,off:0,h:Math.min(H,avail)}); return; }
-    const pt=r.querySelector('.ptx'), lh=pt?parseFloat(getComputedStyle(pt).lineHeight)||28:28, sl=Math.max(lh,Math.floor((avail-8)/lh)*lh);
-    for(let o=0;o<H;o+=sl) U.push({r,off:o,h:Math.min(sl,H-o),cut:true}); });
+    // 太長的段落：在「真正的行與行之間」切開。每一行的高度不一定一樣（註腳上標、收藏記號會把那一行撐高），所以量每一行實際的位置
+    const ends=lineEnds(r), room=avail-8; let st=0;
+    while(st<H-1){ let b=0; for(const e of ends){ if(e>st+1&&e-st<=room) b=e; else if(e-st>room) break; }
+      if(!b) b=Math.min(H,st+room);                    // 一行比整個畫面還高（不太可能）：硬切
+      if(H-b<4) b=H;                                   // 最後只剩一點點邊距：併進這一截
+      U.push({r,off:st,h:b-st,cut:true}); st=b; } });
   const atR=Math.max(0,rows.indexOf(keep)), at=Math.max(0,U.findIndex(u=>u.r===rows[atR]));
   U.forEach(u=>{ u.fig=!!u.r.querySelector(':scope>.L>.fig'); });
   const fwd=from=>{ const G=[]; let cur=[],h=0; for(let k=from;k<U.length;k++){ const u=U[k];
@@ -1096,6 +1130,15 @@ function paginate(keep){
   const atG=G.findIndex(g=>g.includes(U[at]));
   SUBG=G; SUBN=G.length; SUB=SUB_END?SUBN-1:(atG>=0?atG:back.length); SUB_END=false;
   showSub(); }
+function lineEnds(r){
+  // 這一段每一行的底部（相對於這一段的頂端）。用 Range 量文字實際排出來的每一行
+  const top=r.getBoundingClientRect().top, pt=r.querySelector('.ptx'); if(!pt) return [];
+  const rg=document.createRange(); rg.selectNodeContents(pt);
+  const rs=[...rg.getClientRects()].filter(x=>x.height>0&&x.width>0).map(x=>({t:x.top-top,b:x.bottom-top})).sort((a,b)=>a.t-b.t);
+  const lines=[]; for(const x of rs){ const L=lines[lines.length-1]; if(L&&x.t<L.b-2){ L.b=Math.max(L.b,x.b); L.t=Math.min(L.t,x.t); } else lines.push({...x}); }
+  // 切在這一行的底和下一行的頂中間（行距的一半），上下兩截都不會切到字
+  return lines.map((L,i)=>Math.round(lines[i+1]?(L.b+lines[i+1].t)/2:L.b+2));
+}
 function showSub(){
   const sh=$('sheet'), rs=$('rs'), G=SUBG; SUB=Math.max(0,Math.min(SUBN-1,SUB));
   const head=sh.querySelector(':scope>.rhead'), foot=sh.querySelector(':scope>.rf');

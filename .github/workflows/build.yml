@@ -1,4 +1,4 @@
-name: Build Windows installer
+name: Build installers (Windows Setup.exe, Mac dmg/zip)
 
 # 跟雅思練習室一樣：推上 v* 版號（例如 git tag v1.0.0 && git push --tags）就會在 GitHub 的 Windows 電腦上打包
 # 1. PyInstaller 做成 Readiverse.exe（自己的視窗，用 Windows 內建的 Edge WebView2）
@@ -39,13 +39,19 @@ jobs:
           python -c "import ast;[ast.parse(open(f,encoding='utf-8').read()) for f in ['server.py','rv_dict.py','app.py','docling_worker.py']];print('syntax ok')"
           python -c "import server;print('claude:',server.claude_path());print('storage:',[o['label'] for o in server.storage_options()])"
 
+      - name: Version file
+        shell: bash
+        run: |
+          V="${{ github.ref_name }}"; [[ "$V" =~ ^v[0-9] ]] || V="v0.0.0-dev"
+          printf '%s' "$V" > VERSION; cat VERSION
+
       - name: Icon
         run: python -c "from PIL import Image;Image.open('assets/icon.png').save('assets/icon.ico',sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
 
       - name: Build exe
         run: >
           python -m PyInstaller --noconfirm --onedir --windowed --name Readiverse --icon assets/icon.ico
-          --add-data "static;static" --add-data "assets;assets" --add-data "docling_worker.py;."
+          --add-data "static;static" --add-data "assets;assets" --add-data "docling_worker.py;." --add-data "VERSION;."
           --hidden-import server --hidden-import rv_dict --paths .
           --collect-all webview --collect-all clr_loader --collect-all pythonnet --collect-all winpty --hidden-import clr
           app.py
@@ -110,7 +116,7 @@ jobs:
           {
             echo "## 這一版更新了什麼"; echo
             git log --no-merges --format='- %s' ${PREV:+$PREV..}"$TAG" | head -60 || true
-            echo; echo "Windows：下載 Readiverse-Setup.exe，點兩下安裝。出現藍色的「Windows 已保護您的電腦」，按「其他資訊 → 仍要執行」。"
+            echo; echo "Windows 下載 Readiverse-Setup.exe（出現「Windows 已保護您的電腦」按「其他資訊 → 仍要執行」）；Mac 下載 Readiverse-mac.dmg，把 Readiverse 拖進「應用程式」，第一次在「應用程式」裡對它按右鍵 → 打開。已經裝過的話，打開 Readiverse 會提示自動更新。"
           } > notes.md
           cat notes.md
 
@@ -121,3 +127,64 @@ jobs:
           name: Readiverse ${{ github.ref_name }}
           files: dist/Readiverse-Setup.exe
           body_path: notes.md
+
+  mac:
+    needs: windows                      # 等 Windows 那邊建好 Release 再加上 Mac 的檔案（不會建出兩個 Release）
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pywebview
+
+      - name: Version file and icon
+        run: |
+          V="${{ github.ref_name }}"; [[ "$V" =~ ^v[0-9] ]] || V="v0.0.0-dev"
+          printf '%s' "$V" > VERSION; cat VERSION
+          mkdir -p icon.iconset
+          for s in 16 32 128 256 512; do sips -z $s $s assets/icon.png --out icon.iconset/icon_${s}x${s}.png >/dev/null; d=$((s*2)); sips -z $d $d assets/icon.png --out icon.iconset/icon_${s}x${s}@2x.png >/dev/null; done
+          iconutil -c icns icon.iconset -o icon.icns
+
+      - name: Build app
+        run: |
+          python -m PyInstaller --noconfirm --windowed --name Readiverse --icon icon.icns \
+            --osx-bundle-identifier app.readiverse \
+            --add-data "static:static" --add-data "assets:assets" --add-data "docling_worker.py:." --add-data "VERSION:." \
+            --hidden-import server --hidden-import rv_dict --paths . --collect-all webview app.py
+          V=$(cat VERSION); /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${V#v}" dist/Readiverse.app/Contents/Info.plist || true
+          codesign --force --deep -s - dist/Readiverse.app
+
+      - name: Smoke test
+        run: |
+          READIVERSE_NO_DOCLING=1 READIVERSE_LIB="$RUNNER_TEMP/rv-lib" dist/Readiverse.app/Contents/MacOS/Readiverse --server &
+          for i in $(seq 30); do sleep 2; curl -sf http://127.0.0.1:8780/api/caps && break; done
+          curl -sf http://127.0.0.1:8780/ | grep -q Readiverse || { echo "::error::首頁沒有載入"; exit 1; }
+          curl -sf http://127.0.0.1:8780/api/update; echo
+          kill %1 || true
+
+      - name: Zip (auto-update) and dmg (first install)
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent dist/Readiverse.app Readiverse-mac.zip
+          mkdir -p dmg && cp -R dist/Readiverse.app dmg/ && ln -s /Applications dmg/Applications
+          hdiutil create -volname Readiverse -srcfolder dmg -ov -format UDZO Readiverse-mac.dmg
+
+      - name: Upload (manual runs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Readiverse-mac
+          path: |
+            Readiverse-mac.dmg
+            Readiverse-mac.zip
+
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Readiverse-mac.dmg
+            Readiverse-mac.zip

@@ -22,6 +22,7 @@ iconutil -c icns "$ICONSET" -o "$TMP/icon.icns"
 STAGE="$TMP/stage"; mkdir -p "$STAGE/static" "$STAGE/assets"
 cp "$SRC"/server.py "$SRC"/rv_dict.py "$SRC"/docling_worker.py "$SRC"/app.py "$STAGE/"
 cp "$SRC"/static/index.html "$STAGE/static/"; cp "$SRC"/assets/icon.png "$STAGE/assets/"
+V="$(git -C "$SRC" describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)"; printf '%s-dev' "$V" > "$STAGE/VERSION"   # 自己打包的是開發版：顯示版號，但不自動更新
 
 # ---------- 方法一：PyInstaller 打包成真正的 App（需要 uv）----------
 if [ ! -x "$BV" ] && [ -x "$UV" ]; then
@@ -34,7 +35,7 @@ if [ -x "$BV" ] && "$BV" -c "import webview, PyInstaller" 2>/dev/null; then
   ( cd "$STAGE" && "$BV" -m PyInstaller --noconfirm --clean --log-level WARN --windowed --name Readiverse \
       --icon "$TMP/icon.icns" --osx-bundle-identifier app.readiverse \
       --distpath "$TMP/dist" --workpath "$TMP/build" --specpath "$TMP" \
-      --add-data "$STAGE/static:static" --add-data "$STAGE/assets:assets" --add-data "$STAGE/docling_worker.py:." \
+      --add-data "$STAGE/static:static" --add-data "$STAGE/assets:assets" --add-data "$STAGE/docling_worker.py:." --add-data "$STAGE/VERSION:." \
       --hidden-import server --hidden-import rv_dict --paths "$STAGE" "$STAGE/app.py" )
   if [ -d "$TMP/dist/Readiverse.app" ]; then
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0" "$TMP/dist/Readiverse.app/Contents/Info.plist" 2>/dev/null || true

@@ -176,7 +176,7 @@ AI_BAD = {}       # 剛剛失敗的工具：10 分鐘內先跳過，省時間
 
 
 AI_MODELS = [('claude-opus-5-5', 'Opus 5.5', '最強、最準，比較慢、比較花額度'), ('claude-sonnet-5-5', 'Sonnet 5.5', '準、比較快'), ('claude-haiku-5-5', 'Haiku 5.5', '最快、最省額度')]
-AI_DEFAULT = {'best': 'claude-opus-5-5', 'fast': 'claude-haiku-5-5'}       # best：校對、整理頁面；fast：翻譯、書名、解釋
+AI_DEFAULT = {'best': 'claude-sonnet-5-5', 'fast': 'claude-haiku-5-5'}       # best：校對、整理頁面；fast：翻譯、書名、解釋
 
 
 def ai_model(kind='fast'):
@@ -194,6 +194,71 @@ def ai_cmds(prompt, model=None):
     claude = claude_path()
     if not claude: return []
     return [('Claude Code', [claude, '-p', '--model', model or ai_model('fast'), prompt])]
+
+
+def ai_auth():
+    """Claude 登入狀態（claude auth status）"""
+    c = claude_path()
+    if not c: return {'installed': False, 'loggedIn': False}
+    try:
+        r = subprocess.run([c, 'auth', 'status', '--json'], capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL)
+        j = json.loads(r.stdout or '{}')
+    except Exception: j = {}
+    return {'installed': True, 'loggedIn': bool(j.get('loggedIn')), 'expires': j.get('loginExpiresAt') or '', 'method': j.get('authMethod') or ''}
+
+
+LOGIN = {'state': '', 'url': '', 'error': '', 'out': '', 'fd': None, 'proc': None}
+
+
+def login_start():
+    """在背景跑 claude auth login（看不見的終端機）：它會自己打開瀏覽器的授權頁；網址也抓下來，App 裡可以再按一次打開"""
+    c = claude_path()
+    if not c: return {'state': 'error', 'error': '這台電腦沒有 Claude Code'}
+    login_stop()
+    import pty, select
+    m, s_ = pty.openpty()
+    p = subprocess.Popen([c, 'auth', 'login'], stdin=s_, stdout=s_, stderr=s_, close_fds=True, start_new_session=True)
+    os.close(s_)
+    LOGIN.update(state='waiting', url='', error='', out='', fd=m, proc=p)
+    def pump():
+        buf = b''
+        while LOGIN['proc'] is p:
+            try:
+                r, _, _ = select.select([m], [], [], 0.5)
+                if r: buf += os.read(m, 4096)
+            except OSError: break
+            txt = re.sub(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]|\x1b8;;[^\x1b]*\x1b', '', buf.decode('utf-8', 'ignore'))
+            LOGIN['out'] = txt[-2000:]
+            u = re.findall(r'https://[^\s\x1b\x07\]]+', buf.decode('utf-8', 'ignore'))
+            if u and not LOGIN['url']: LOGIN['url'] = u[0]
+            if 'Login successful' in txt or 'successfully' in txt.lower(): LOGIN['state'] = 'done'; break
+            if p.poll() is not None:
+                if LOGIN['state'] == 'waiting': LOGIN.update(state='error', error=(txt.strip().splitlines() or ['登入失敗'])[-1][:200])
+                break
+        try: os.close(m)
+        except OSError: pass
+    threading.Thread(target=pump, daemon=True).start()
+    return login_state()
+
+
+def login_code(code):
+    """授權頁給了一串代碼：貼回登入程式"""
+    if LOGIN.get('fd') is None or LOGIN['state'] != 'waiting': return login_state()
+    try: os.write(LOGIN['fd'], (str(code).strip() + '\r').encode())
+    except OSError as e: LOGIN.update(state='error', error=str(e))
+    return login_state()
+
+
+def login_stop():
+    p = LOGIN.get('proc')
+    if p and p.poll() is None:
+        try: os.killpg(p.pid, 15)
+        except Exception: pass
+    LOGIN.update(proc=None, fd=None)
+
+
+def login_state():
+    return {k: LOGIN[k] for k in ('state', 'url', 'error')}
 
 
 def ai_test():
@@ -282,6 +347,7 @@ def _noise_tok(t):
 
 
 SUPS = str.maketrans('0123456789,', '⁰¹²³⁴⁵⁶⁷⁸⁹˒')
+NOT_FN = re.compile(r'\b(?:no|nos|vol|vols|p|pp|fig|figs|ch|chap|chapter|part|table|sec|section|ed|op|art|para|v|vs|ver|step|unit|test|question|page|level|grade|room|act|scene)\.?\s?$', re.I)   # 這些字後面的數字不是註腳
 
 
 def clean_pages(pages, frozen=()):
@@ -302,7 +368,7 @@ def clean_pages(pages, frozen=()):
                 x = re.sub(r'^(?:[-–]|[a-z])\s+(?=[A-Z"“‘])', '', x)         # 章節開頭的裝飾字被辨識成「-」或一個小寫字母
                 x = re.sub(r'^[-–]\s+(?=[a-z])', '', x)                       # 「- twins, and they…」：換行的連字號跑到段落開頭
                 x = re.sub(r'(\d)- (?=[A-Z])', r'\1. ', x)                       # 「summer of 1994- Looking」：句號被認成「-」
-                x = re.sub(r'(?<=[.!?"”’)])\s?(\d{1,3}(?:,\s?\d{1,3})*)(?=\s+[A-Z"“‘]|\s*$)', lambda m: m.group(1).replace(' ', '').translate(SUPS), x)   # 註腳編號：書上的上標 ¹⁹ 被讀成一般數字「baseline. 19」→ 改回上標「baseline.¹⁹」
+                x = re.sub(r'(?<=[.!?"”’)])\s?(\d{1,3}(?:,\s?\d{1,3})*)(?=\s+[A-Z"“‘]|\s*$)', lambda m: m.group(0) if NOT_FN.search(m.string[:m.start()]) else m.group(1).replace(' ', '').translate(SUPS), x)   # 註腳編號：書上的上標 ¹⁹ 被讀成一般數字「baseline. 19」→ 改回上標「baseline.¹⁹」
                 if not x or re.fullmatch(r'(page\s*)?[\divxlc]{1,5}', x, re.I): continue      # 只有頁碼
                 if re.fullmatch(r'[A-HJ-Za-z]{1,2}|[^\w\s]{1,3}', x): continue           # 裝飾字、單獨一兩個字母（「N」）
             out.append(x)
@@ -451,6 +517,136 @@ def quality_job(bid):
         update_book(bid, ocrBad=bad_pages(pages))
 
 
+# ---------- AI 校對：Claude 看原書每一頁的圖，逐字對照解析出來的文字，只回報差異；程式照著改（AI 不會整段重寫）----------
+PROOFQ = queue.Queue()
+PROOF_PROMPT = ("Read the image file %s. It is one page of a printed book.\n"
+    "Below is the text we extracted. \"prev_tail\" is the end of the previous page's last paragraph (this page may start in the middle of it). "
+    "\"paras\" are the text paragraphs on this page (figures and tables are handled separately; ignore their contents).\n"
+    "Proofread word by word against the image, IN READING ORDER. Report ONLY real differences in the body text: missing words or sentences, misread words, "
+    "words or sentences in the wrong place or order (for example a word that belongs at the end of prev_tail but was put at the start of paragraph 0 — "
+    "fix it by inserting it in the right place and replacing the misplaced copy with an empty string), "
+    "wrong punctuation (em dashes, quotes, apostrophes). Footnote reference numbers should be superscript digits (like ¹⁹) right after the word or punctuation.\n"
+    "Ignore the running header and page number, line-end hyphenation, indentation and paragraph spacing.\n"
+    "Reply with ONLY JSON:\n"
+    "{\"fixes\":[{\"where\":\"prev_tail\" or a paragraph index,\"find\":\"exact short substring as given\",\"replace\":\"what the page says\"}],\n"
+    " \"inserts\":[{\"where\":\"prev_tail\" or a paragraph index,\"after\":\"exact short substring as given\",\"insert\":\"missing text exactly as printed\"}],\n"
+    " \"ok\":true or false}\n\n%s")
+
+
+def render_pages(bid, nums):
+    """把 PDF 的頁畫成圖（給 AI 看），存在 ~/.readiverse/proof/<書>/"""
+    out = os.path.join(HOME_DIR, 'proof', bid); os.makedirs(out, exist_ok=True)
+    todo = [n for n in nums if not os.path.exists(os.path.join(out, 'p%d.jpg' % n))]
+    if todo and os.path.exists(VPY):
+        code = ('import sys,pypdfium2 as P;d=P.PdfDocument(sys.argv[1]);o=sys.argv[2]\n'
+                'for n in map(int,sys.argv[3:]): d[n-1].render(scale=2).to_pil().convert("RGB").save("%s/p%d.jpg"%(o,n),quality=85)')
+        for k in range(0, len(todo), 50):
+            subprocess.run([VPY, '-c', code, os.path.join(LIB, bid, 'book.pdf'), out] + [str(n) for n in todo[k:k + 50]], capture_output=True, timeout=600)
+    return out
+
+
+def proof_page(bid, pno, imgdir):
+    """校對一頁（pno 從 0 開始）。回傳這頁的紀錄"""
+    d = os.path.join(LIB, bid)
+    with LOCK:
+        pages = read_json(os.path.join(d, 'pages.json')) or []
+    if pno >= len(pages): return None
+    paras = [x for x in pages[pno] if is_text(x)]
+    if not paras: return {'ok': True, 'skip': 'no text'}
+    prev = next((x for x in reversed(pages[pno - 1]) if is_text(x)), '') if pno > 0 else ''
+    img = os.path.join(imgdir, 'p%d.jpg' % (pno + 1))
+    if not os.path.exists(img): return {'ok': False, 'error': '沒有頁面圖'}
+    payload = json.dumps({'prev_tail': prev[-200:], 'paras': paras}, ensure_ascii=False)
+    c = claude_path()
+    if not c: raise RuntimeError('找不到 Claude Code')
+    r = subprocess.run([c, '-p', '--model', ai_model('best'), '--allowedTools', 'Read', '--add-dir', imgdir, '--', PROOF_PROMPT % (img, payload)],
+                       capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
+    m = re.search(r'\{[\s\S]*\}', r.stdout or '')
+    if r.returncode != 0 or not m:
+        err = ((r.stderr or r.stdout or '').strip().splitlines() or ['沒有回應'])[-1][:200]
+        if re.search(r'auth|login|expired', err, re.I): raise RuntimeError('Claude 沒有登入：' + err)
+        return {'ok': False, 'error': err}
+    try: j = json.loads(m.group(0))
+    except ValueError: return {'ok': False, 'error': 'AI 回傳的格式不對'}
+    applied, failed = [], []
+    with LOCK:
+        pages = read_json(os.path.join(d, 'pages.json')) or []
+        frozen = used_pages(read_json(os.path.join(d, 'state.json'), {}))
+        def target(where):
+            if where == 'prev_tail':
+                if pno == 0 or (pno - 1) in frozen: return None
+                pg = pages[pno - 1]; idx = max([i for i, x in enumerate(pg) if is_text(x)] or [-1])
+                return (pno - 1, idx) if idx >= 0 else None
+            if pno in frozen: return None
+            try: k = int(where)
+            except (TypeError, ValueError): return None
+            T = [i for i, x in enumerate(pages[pno]) if is_text(x)]
+            return (pno, T[k]) if 0 <= k < len(T) else None
+        for f in j.get('fixes') or []:
+            t, find, rep_ = target(f.get('where')), str(f.get('find') or ''), str(f.get('replace') or '')
+            if not t or not find or len(rep_) > len(find) + 300: failed.append(f); continue
+            if not rep_ and len(find) > 60: failed.append(f); continue      # 不准一次刪掉一大段
+            txt = pages[t[0]][t[1]]
+            if txt.count(find) != 1: failed.append(f); continue
+            pages[t[0]][t[1]] = txt.replace(find, rep_); applied.append(f)
+        for f in j.get('inserts') or []:
+            t, after, ins = target(f.get('where')), str(f.get('after') or ''), str(f.get('insert') or '').strip()
+            if not t or not after or not ins or len(ins) > 1500: failed.append(f); continue
+            txt = pages[t[0]][t[1]]
+            if txt.count(after) != 1: failed.append(f); continue
+            k = txt.index(after) + len(after)
+            left, right = txt[:k].rstrip(' '), txt[k:].lstrip(' ')
+            pre = '' if ins[:1] in '.,;:!?)]”’' else ' '                          # 插入的字前後補空格（標點不補）
+            post = '' if not right or right[:1] in '.,;:!?)]”’' else ' '
+            pages[t[0]][t[1]] = left + pre + ins + post + right
+            applied.append(f)
+        if applied:
+            for q in {pno - 1, pno}:                       # 被清空的段落拿掉
+                if 0 <= q < len(pages): pages[q] = [x for x in pages[q] if not is_text(x) or x.strip()]
+            write_json(os.path.join(d, 'pages.json'), pages)
+    return {'ok': bool(j.get('ok')) and not failed, 'applied': applied, 'failed': failed, 't': int(time.time())}
+
+
+def proof_worker():
+    while True:
+        bid = PROOFQ.get()
+        try: proof_job(bid)
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            update_book(bid, proof={'status': 'error', 'error': str(e)[:300]})
+
+
+def proof_job(bid):
+    from concurrent.futures import ThreadPoolExecutor
+    d = os.path.join(LIB, bid)
+    with LOCK:
+        pages = read_json(os.path.join(d, 'pages.json')) or []
+    rec = read_json(os.path.join(d, 'proof.json'), {}) or {}
+    todo = [i for i, pg in enumerate(pages) if any(is_text(x) for x in pg) and not (rec.get(str(i + 1)) or {}).get('t')]
+    total = sum(1 for pg in pages if any(is_text(x) for x in pg)); done = total - len(todo)
+    update_book(bid, proof={'status': 'running', 'done': done, 'total': total})
+    imgdir = render_pages(bid, [i + 1 for i in todo])
+    stop = [None]
+    def one(i):
+        if stop[0]: return
+        try: r = proof_page(bid, i, imgdir)
+        except RuntimeError as e: stop[0] = str(e); return
+        if r is None: return
+        with LOCK:
+            rr = read_json(os.path.join(d, 'proof.json'), {}) or {}; rr[str(i + 1)] = r; write_json(os.path.join(d, 'proof.json'), rr)
+            b = find_book(load_index(), bid); pr = dict((b or {}).get('proof') or {})
+            pr['done'] = pr.get('done', 0) + 1; pr['rev'] = int(time.time() * 1000)
+            update_book(bid, proof=pr)
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        list(ex.map(one, todo))
+    if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300], 'done': done, 'total': total}); return
+    rr = read_json(os.path.join(d, 'proof.json'), {}) or {}
+    fixed = sum(len(v.get('applied') or []) for v in rr.values() if isinstance(v, dict))
+    with LOCK:
+        pages = read_json(os.path.join(d, 'pages.json')) or []
+    update_book(bid, proof={'status': 'done', 'done': total, 'total': total, 'fixed': fixed, 'rev': int(time.time() * 1000)}, ocrBad=bad_pages(pages))
+
+
 # ---------- Docling：版面解析（圖片、表格、段落）。裝在 Readiverse 自己的 Python 3.12 環境 ----------
 HOME_DIR = os.path.expanduser('~/.readiverse')
 VENV = os.path.join(HOME_DIR, 'docling-venv')
@@ -587,7 +783,10 @@ def parse_job(bid):
         pages = read_json(os.path.join(d, 'pages.json')) or []
         b = update_book(bid, parse={'status': 'done', 'next': total, 'total': total, 'rev': int(time.time() * 1000)},
                         hasText=sum(len(page_text(pg)) for pg in pages) > 40)
-    if b and b.get('scanned'): QQ.put(bid)              # 掃描書：檢查每一頁有沒有辨識錯字
+    if b and claude_path() and (read_json(CONFIG, {}) or {}).get('proof', True):
+        with LOCK: write_json(os.path.join(d, 'proof.json'), {})       # 重新解析過：整本重新校對
+        PROOFQ.put(bid)                                                 # AI 逐頁對照原書校對
+    elif b and b.get('scanned'): QQ.put(bid)                            # 沒有 Claude：至少檢查亂碼頁
 
 
 def start_parse(bid, restart=False):
@@ -783,9 +982,22 @@ class H(BaseHTTPRequestHandler):
             try: return self.send(200, rv_dict.ielts_import())
             except ValueError as e: return self.err(404, str(e))
         if p == ['caps'] and m == 'GET':
-            return self.send(200, {'docling': DOCLING, 'claude': bool(claude_path()), 'models': AI_MODELS, 'aiModels': {k: ai_model(k) for k in AI_DEFAULT}})
+            return self.send(200, {'docling': DOCLING, 'claude': bool(claude_path()), 'proof': (read_json(CONFIG, {}) or {}).get('proof', True), 'models': AI_MODELS, 'aiModels': {k: ai_model(k) for k in AI_DEFAULT}})
+        if p == ['ai', 'auth'] and m == 'GET':
+            return self.send(200, ai_auth())
+        if p == ['ai', 'login'] and m == 'POST':
+            return self.send(200, login_start())
+        if p == ['ai', 'login'] and m == 'GET':
+            return self.send(200, login_state())
+        if p == ['ai', 'login', 'code'] and m == 'POST':
+            return self.send(200, login_code(self.body_json().get('code', '')))
+        if p == ['ai', 'login', 'cancel'] and m == 'POST':
+            login_stop(); LOGIN['state'] = ''; return self.send(200, login_state())
         if p == ['ai', 'test'] and m == 'POST':
             return self.send(200, ai_test())
+        if p == ['ai', 'proof'] and m == 'PUT':      # 匯入後要不要 AI 校對
+            cfg = read_json(CONFIG, {}) or {}; cfg['proof'] = bool(self.body_json().get('on')); write_json(CONFIG, cfg)
+            return self.send(200, {'proof': cfg['proof']})
         if p == ['ai', 'models'] and m == 'PUT':
             j = self.body_json(); cfg = read_json(CONFIG, {}) or {}
             cfg['aiModels'] = {k: j[k] for k in AI_DEFAULT if j.get(k) in [x[0] for x in AI_MODELS]}
@@ -883,6 +1095,10 @@ class H(BaseHTTPRequestHandler):
                 if not b.get('hasText'): return self.err(400, '這本 PDF 抽不出文字，AI 沒辦法判斷')
                 b = update_book(bid, ai={'status': 'queued'}); AIQ.put(bid)
                 return self.send(200, b)
+            if sub == 'proof' and m == 'POST':       # 重新校對整本
+                if self.body_json().get('restart'): write_json(os.path.join(d, 'proof.json'), {})
+                b = update_book(bid, proof={'status': 'queued', 'done': 0, 'total': b.get('pages') or 0}); PROOFQ.put(bid)
+                return self.send(200, b)
             if sub == 'ai-page' and m == 'POST':     # 用 AI 整理某一頁
                 pno = int(self.body_json().get('page') or 0)
                 with LOCK:
@@ -939,11 +1155,13 @@ def main():
     rv_dict.init(lambda: LIB, ai_json)
     threading.Thread(target=parse_worker, daemon=True).start()
     threading.Thread(target=quality_worker, daemon=True).start()
+    threading.Thread(target=proof_worker, daemon=True).start()
     threading.Thread(target=docling_setup, daemon=True).start()
     with LOCK:                                   # 上次沒做完的：接著做
         for b in load_index()['books']:
             if (b.get('ai') or {}).get('status') in ('running', 'queued'): AIQ.put(b['id'])
             if (b.get('parse') or {}).get('status') in ('running', 'queued'): PARSEQ.put(b['id'])
+            elif (b.get('proof') or {}).get('status') in ('running', 'queued'): PROOFQ.put(b['id'])
     srv = ThreadingHTTPServer(('127.0.0.1', PORT), H)
     url = 'http://localhost:%d' % PORT
     print('Readiverse 已啟動：%s\n書庫：%s\n要關掉請按 Ctrl+C' % (url, LIB))

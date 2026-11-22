@@ -198,30 +198,266 @@ def translate(paras):
     return arr[:len(paras)]
 
 
-# ---------- 匯入後 AI 整理：書名／作者／分類，每一頁重新分段、拿掉頁首頁尾 ----------
+# ---------- 文字清理（程式碼，不用 AI）：頁首頁尾、OCR 雜訊、跨頁斷字、圖表旁的碎字 ----------
+def is_text(x): return isinstance(x, str)
+
+
+def page_text(pg): return ''.join(x for x in pg if is_text(x))
+
+
+def used_pages(state):
+    """畫過螢光筆、寫過段落筆記、翻譯過的頁：段落不能再動，不然標記的位置會跑掉"""
+    state = state or {}
+    u = {int(k.split(':')[0]) for k, v in (state.get('marks') or {}).items() if v}
+    u |= {int(k.split(':')[0]) for k, v in (state.get('paraNotes') or {}).items() if v}
+    u |= {int(k) for k, v in (state.get('zh') or {}).items() if v}
+    u |= {int(n.get('page')) for n in (state.get('notes') or {}).values() if isinstance(n, dict) and n.get('page') is not None}
+    return u
+
+
+def _hkey(s):
+    """頁首的比對用：去掉前後的頁碼（「78 EMOTIONALLY CHARGED」），中間的數字保留（Questions 1-7 和 8-13 不一樣）"""
+    s = re.sub(r'^\s*\d{1,4}\s+|\s+\d{1,4}\s*$', '', s.lower())
+    return re.sub(r'[\W_]+', '', s)
+
+
+def _headish(x):
+    """像頁首頁尾的短句：短、不是句子（不以句點結尾）"""
+    return len(x) <= 70 and not re.search(r'[.!?]["”’)]?$', x)
+
+
+def _noise_tok(t):
+    al = sum(c.isalnum() for c in t)
+    return len(t) - al >= 2 and sum(c.isalpha() for c in t) <= 1
+
+
+def clean_pages(pages, frozen=()):
+    """回傳清理過的 pages；frozen 裡的頁不動"""
+    pages = [list(pg) for pg in pages]; n = len(pages); frozen = set(frozen)
+    # 1) 段落內：軟連字號、段首的 OCR 雜訊（----=---~->）、多餘空白
+    for p, pg in enumerate(pages):
+        if p in frozen: continue
+        out = []
+        for x in pg:
+            if is_text(x):
+                x = re.sub(r'­\s*', '', x)
+                toks = x.split()
+                while toks and _noise_tok(toks[0]): toks.pop(0)
+                x = ' '.join(toks)
+                if not x or re.fullmatch(r'(page\s*)?[\divxlc]{1,5}', x, re.I): continue      # 只有頁碼
+            out.append(x)
+        pages[p] = out
+    # 2) 頁首頁尾：很多頁的開頭／結尾都出現的短句（書名、章名、「78 EMOTIONALLY CHARGED」）
+    cnt = {}
+    for pg in pages:
+        T = [x for x in pg if is_text(x)]
+        for k in {_hkey(x) for x in T[:2] + T[-2:] if _headish(x)}:
+            cnt[k] = cnt.get(k, 0) + 1
+    heads = {k for k, c in cnt.items() if c >= 3 and len(k) >= 6}
+    if heads:
+        seen = set()                                   # 第一次出現的留著（通常是真正的章名），之後重複的才是頁首
+        for p, pg in enumerate(pages):
+            T = [i for i, x in enumerate(pg) if is_text(x)]
+            edge = set(T[:2] + T[-2:]); keep = []
+            for i, x in enumerate(pg):
+                k = _hkey(x) if is_text(x) and i in edge and _headish(x) else None
+                if k in heads:
+                    if k not in seen: seen.add(k); keep.append(x); continue
+                    if p not in frozen: continue
+                keep.append(x)
+            pages[p] = keep
+    # 3) 圖表旁邊的碎字（座標軸標籤之類）：只有幾個字、沒有句點，又緊貼著圖或表
+    for p, pg in enumerate(pages):
+        if p in frozen or all(is_text(x) for x in pg): continue
+        keep = []
+        for i, x in enumerate(pg):
+            near = (i > 0 and not is_text(pg[i - 1])) or (i + 1 < len(pg) and not is_text(pg[i + 1]))
+            if is_text(x) and near and len(x.split()) <= 4 and not re.search(r'[.!?:;]', x): continue
+            # 圖表上面那段沒寫完、下面那段開頭黏了圖上的標籤（「Passive Active to avoid…」）→ 拿掉那幾個標籤字
+            if is_text(x) and i > 0 and not is_text(pg[i - 1]):
+                prev = next((y for y in reversed(pg[:i - 1]) if is_text(y)), '')
+                m = re.match(r'((?:[A-Z][\w’\'-]*\s+){1,4})([a-z].*)$', x, re.S)
+                if prev and not re.search(r'[.!?:;"”’)]$', prev.strip()) and m: x = m.group(2)
+            keep.append(x)
+        pages[p] = keep
+    # 4) 跨頁斷字：這頁最後是「ex-」，下一頁開頭是「pected …」→ 接回這一頁
+    for p in range(n - 1):
+        if p in frozen or (p + 1) in frozen: continue
+        a = [i for i, x in enumerate(pages[p]) if is_text(x)]; b = [i for i, x in enumerate(pages[p + 1]) if is_text(x)]
+        if not a or not b: continue
+        last, first = pages[p][a[-1]], pages[p + 1][b[0]]
+        m = re.match(r'([a-z][\w’\'-]*[.,;:!?]?)\s*(.*)$', first, re.S)
+        if re.search(r'[A-Za-z]-$', last) and m:
+            pages[p][a[-1]] = last[:-1] + m.group(1)
+            if m.group(2).strip(): pages[p + 1][b[0]] = m.group(2).strip()
+            else: pages[p + 1].pop(b[0])
+    return pages
+
+
+# ---------- Docling：版面解析（圖片、表格、段落）。裝在 Readiverse 自己的 Python 3.12 環境 ----------
+HOME_DIR = os.path.expanduser('~/.readiverse')
+VENV = os.path.join(HOME_DIR, 'docling-venv')
+VPY = os.path.join(VENV, 'Scripts', 'python.exe') if sys.platform.startswith('win') else os.path.join(VENV, 'bin', 'python')
+DOCLING = {'status': 'checking', 'error': ''}      # checking / installing / ready / unavailable / error
+DOCLING_READY = threading.Event()
+
+
+def _find_uv():
+    for c in (shutil.which('uv'), os.path.expanduser('~/.local/bin/uv'), os.path.expanduser('~/.cargo/bin/uv'), '/opt/homebrew/bin/uv'):
+        if c and os.path.exists(c): return c
+    return None
+
+
+def _find_py310():
+    cands = [shutil.which(x) for x in ('python3.13', 'python3.12', 'python3.11', 'python3.10', 'python3', 'python')]
+    cands += [os.path.expanduser('~/.local/bin/python3.12'), '/opt/homebrew/bin/python3', '/usr/local/bin/python3']
+    for c in cands:
+        if not c or not os.path.exists(c): continue
+        try:
+            v = subprocess.run([c, '-c', 'import sys;print(sys.version_info[:2]>=(3,10))'], capture_output=True, text=True, timeout=20).stdout.strip()
+            if v == 'True': return c
+        except Exception: pass
+    return None
+
+
+def docling_setup(force=False):
+    """檢查 Docling 能不能用，不能用就在背景安裝（約 2 GB，第一次要幾分鐘）"""
+    def ok():
+        try: return os.path.exists(VPY) and subprocess.run([VPY, '-c', 'import docling'], capture_output=True, timeout=120).returncode == 0
+        except Exception: return False
+    if ok():
+        DOCLING.update(status='ready', error=''); DOCLING_READY.set(); return
+    if os.environ.get('READIVERSE_NO_DOCLING'):
+        DOCLING.update(status='unavailable', error='已關閉'); return
+    os.makedirs(HOME_DIR, exist_ok=True)
+    log = open(os.path.join(HOME_DIR, 'docling-install.log'), 'a', encoding='utf-8')
+    DOCLING.update(status='installing', error='')
+    try:
+        uv = _find_uv()
+        if uv:
+            cmds = [[uv, 'venv', '-q', '--allow-existing', '-p', '3.12', VENV], [uv, 'pip', 'install', '-q', '-p', VPY, 'docling']]
+        else:
+            py = _find_py310()
+            if not py:
+                DOCLING.update(status='unavailable', error='需要 Python 3.10 以上（或 uv）才能裝 Docling'); return
+            cmds = [[py, '-m', 'venv', VENV], [VPY, '-m', 'pip', 'install', '-q', 'docling']]
+        for c in cmds:
+            log.write('$ %s\n' % ' '.join(c)); log.flush()
+            r = subprocess.run(c, stdout=log, stderr=log, timeout=3600)
+            if r.returncode != 0: raise RuntimeError('安裝失敗（看 ~/.readiverse/docling-install.log）')
+        if not ok(): raise RuntimeError('裝好了但載入失敗（看 ~/.readiverse/docling-install.log）')
+        DOCLING.update(status='ready', error=''); DOCLING_READY.set()
+    except Exception as e:
+        DOCLING.update(status='error', error=str(e)[:300])
+    finally:
+        log.close()
+
+
+def fix_dashes(items, raw_text):
+    """Docling 會把「—」變成「-」：pdf.js 抽的原始文字裡同一個地方是「—」就換回來"""
+    if '—' not in raw_text and '–' not in raw_text: return items
+    flat = re.sub(r'\s+', ' ', raw_text)
+    def fix(t):
+        def rp(m):
+            a, b = t[max(0, m.start() - 12):m.start()], t[m.end():m.end() + 12]
+            for d in ('—', '–'):
+                if a + d + b in flat or (a[-6:] + d + b[:6]) in flat: return d
+            return m.group(0)
+        return re.sub(r'(?<=\w)-(?=\w)', rp, t)
+    return [fix(x) if is_text(x) else x for x in items]
+
+
+PARSEQ = queue.Queue()
+PARSE_PROC = {}
+
+
+def parse_worker():
+    while True:
+        bid = PARSEQ.get()
+        DOCLING_READY.wait()
+        try: parse_job(bid)
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            update_book(bid, parse={'status': 'error', 'error': str(e)[:300]})
+
+
+def parse_job(bid):
+    with LOCK:
+        b = find_book(load_index(), bid)
+    if not b: return
+    d = os.path.join(LIB, bid); pdf = os.path.join(d, 'book.pdf'); figdir = os.path.join(d, 'figs')
+    st = dict(b.get('parse') or {}); start = int(st.get('next') or 0) + 1
+    update_book(bid, parse={'status': 'running', 'next': start - 1, 'total': b.get('pages') or 0})
+    p = subprocess.Popen([VPY, os.path.join(ROOT, 'docling_worker.py'), pdf, figdir, '20', str(start)],
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8')
+    PARSE_PROC[bid] = p; total = b.get('pages') or 0; got = False
+    try:
+        for line in p.stdout:
+            try: j = json.loads(line)
+            except ValueError: continue
+            if 'total' in j: total = j['total']; continue
+            with LOCK:
+                if not find_book(load_index(), bid): p.kill(); return      # 書被刪掉了
+                if 'pages' in j:
+                    got = True
+                    pf = os.path.join(d, 'pages.json'); pages = read_json(pf) or []
+                    while len(pages) < total: pages.append([])
+                    frozen = used_pages(read_json(os.path.join(d, 'state.json'), {}))
+                    raw = read_json(os.path.join(d, 'pages_raw.json')) or []
+                    for k, items in j['pages'].items():
+                        i = int(k) - 1
+                        if i in frozen or not (0 <= i < len(pages)): continue
+                        new = [re.sub(r'\s+', ' ', x).strip() if is_text(x) else x for x in items]
+                        if i < len(raw): new = fix_dashes(new, ' '.join(x for x in raw[i] if is_text(x)))
+                        if page_text(new).strip() or any(not is_text(x) for x in new) or not page_text(pages[i]).strip():
+                            pages[i] = new
+                    pages = clean_pages(pages, frozen)
+                    write_json(pf, pages)
+                update_book(bid, parse={'status': 'running', 'next': j['to'], 'total': total, 'rev': int(time.time() * 1000)},
+                            hasText=True if got else b.get('hasText'))
+        p.wait()
+    finally:
+        PARSE_PROC.pop(bid, None)
+    if p.returncode not in (0, None) and not got:
+        update_book(bid, parse={'status': 'error', 'error': 'Docling 解析失敗（代碼 %s）' % p.returncode}); return
+    with LOCK:
+        pages = read_json(os.path.join(d, 'pages.json')) or []
+        update_book(bid, parse={'status': 'done', 'next': total, 'total': total, 'rev': int(time.time() * 1000)},
+                    hasText=sum(len(page_text(pg)) for pg in pages) > 40)
+
+
+def start_parse(bid, restart=False):
+    b = find_book(load_index(), bid)
+    if not b: return None
+    if DOCLING['status'] in ('unavailable', 'error'):
+        return update_book(bid, parse={'status': 'skipped', 'error': DOCLING.get('error') or 'Docling 不能用'})
+    nxt = 0 if restart else int((b.get('parse') or {}).get('next') or 0)
+    b = update_book(bid, parse={'status': 'queued', 'next': nxt, 'total': b.get('pages') or 0})
+    PARSEQ.put(bid); return b
+
+
+# ---------- AI：只在匯入時判斷一次書名、作者、分類、標籤、哪一頁是封面（使用者改過的欄位不蓋掉）----------
 AIQ = queue.Queue()
-BATCH_CHARS = 9000
 
 
-def ai_meta(bid, pages, ix):
-    b = find_book(ix, bid)
-    sample = '\n\n'.join(p for pg in pages[:4] for p in pg)[:5000]
-    prompt = ('Below is the beginning of a PDF the user imported (file name: %r). Identify the book/document. '
-              'Reply with ONLY a JSON object: {"title": "...", "author": "... or empty", "category": "...", "tags": ["..", ".."]}. '
-              'category must be exactly one of %s, or "" if none fits. tags: up to 3 short topic tags in Traditional Chinese.\n\n%s'
-              % (b.get('file') or b['title'], json.dumps(ix['categories'], ensure_ascii=False), sample))
+def ai_meta(b, pages, cats):
+    sample = ''.join('\n\n[PAGE %d]\n' % (i + 1) + '\n'.join(x for x in pg if is_text(x)) for i, pg in enumerate(pages[:5]))[:6000]
+    prompt = ('Below is the beginning of a PDF the user imported (file name: %r), page by page. Identify the book/document. '
+              'Reply with ONLY a JSON object: {"title": "...", "author": "... or empty", "category": "...", "tags": ["..", ".."], "coverPage": 0}. '
+              'category must be exactly one of %s, or "" if none fits. tags: up to 3 short topic tags in Traditional Chinese. '
+              'coverPage: the page number (1-5) that is the book\'s front cover (little text, mostly title/author), or 0 if none of them is.\n\n%s'
+              % (b.get('file') or b['title'], json.dumps(cats, ensure_ascii=False), sample))
     return ai_json(prompt, dict, 180)
 
 
-def ai_clean_pages(chunk):
-    """chunk = {頁碼: [段落…]} → {頁碼: [整理後的段落…]}"""
-    prompt = ('These are paragraphs extracted from PDF pages (JSON: page number -> list of paragraphs). The extraction may have '
-              'broken paragraphs in the wrong places, hyphenated line-break words, running headers/footers, page numbers, URLs and watermarks. '
-              'For each page, return the cleaned list of paragraphs: merge pieces that belong to one paragraph, split ones that '
-              'were wrongly joined, rejoin hyphenated words, keep headings and question lines as their own paragraphs, remove running '
-              'headers/footers/page numbers/URLs/watermarks. Do NOT translate, summarize or reword anything; keep every other word exactly. '
-              'Reply with ONLY a JSON object with the same page keys.\n\n%s' % json.dumps(chunk, ensure_ascii=False))
-    return ai_json(prompt, dict, 420)
+def render_cover(bid, page_no):
+    """用 Docling 環境裡的 pypdfium2 把某一頁畫成封面圖（Docling 還沒裝好就跳過）"""
+    if not os.path.exists(VPY): return False
+    d = os.path.join(LIB, bid)
+    code = ('import sys,pypdfium2 as P;d=P.PdfDocument(sys.argv[1]);p=d[int(sys.argv[2])-1];'
+            's=480/p.get_width();p.render(scale=s).to_pil().convert("RGB").save(sys.argv[3],"JPEG",quality=84)')
+    r = subprocess.run([VPY, '-c', code, os.path.join(d, 'book.pdf'), str(page_no), os.path.join(d, 'cover.jpg')], capture_output=True, timeout=120)
+    return r.returncode == 0
 
 
 def ai_worker():
@@ -237,51 +473,52 @@ def ai_job(bid):
         ix = load_index(); b = find_book(ix, bid)
     if not b: return
     d = os.path.join(LIB, bid)
-    raw = read_json(os.path.join(d, 'pages_raw.json')) or read_json(os.path.join(d, 'pages.json')) or []
-    if not os.path.exists(os.path.join(d, 'pages_raw.json')): write_json(os.path.join(d, 'pages_raw.json'), raw)
-    st = dict(b.get('ai') or {}); nxt = int(st.get('next') or 0); total = len(raw)
-    update_book(bid, ai={'status': 'running', 'next': nxt, 'total': total, 'step': 'meta' if not st.get('metaDone') else 'pages', 'metaDone': st.get('metaDone')})
-    if not st.get('metaDone'):
-        try:
-            m = ai_meta(bid, raw, ix); up = {}
-            with LOCK:
-                ix = load_index(); b = find_book(ix, bid)
-                if b.get('title') == b.get('autoTitle') and str(m.get('title') or '').strip(): up['title'] = str(m['title']).strip()[:300]
-                if not b.get('author') and str(m.get('author') or '').strip(): up['author'] = str(m['author']).strip()[:200]
-                if not b.get('category') and m.get('category') in ix['categories']: up['category'] = m['category']
-                if not b.get('tags') and isinstance(m.get('tags'), list): up['tags'] = [str(t)[:40] for t in m['tags'][:3]]
-                b.update(up); b['ai'] = dict(b.get('ai') or {}, metaDone=True, step='pages'); save_index(ix)
-        except RuntimeError as e:
-            update_book(bid, ai={'status': 'error', 'error': str(e)[:300], 'next': 0, 'total': total}); return
-    errs = 0
-    while nxt < total:
-        chunk, size, i = {}, 0, nxt
-        while i < total and (not chunk or size + len(''.join(raw[i])) < BATCH_CHARS):
-            if raw[i]: chunk[str(i + 1)] = raw[i]
-            size += len(''.join(raw[i])); i += 1
-        if chunk:
-            try: res = ai_clean_pages(chunk)
-            except RuntimeError as e:
-                errs += 1
-                if errs >= 2: update_book(bid, ai=dict((find_book(load_index(), bid) or {}).get('ai') or {}, status='error', error=str(e)[:300], next=nxt)); return
-                continue
-            with LOCK:
-                pf = os.path.join(d, 'pages.json'); pages = read_json(pf) or raw
-                state = read_json(os.path.join(d, 'state.json'), {}) or {}
-                used = {int(k.split(':')[0]) for k, v in (state.get('marks') or {}).items() if v} | {int(k) for k in (state.get('zh') or {})} \
-                    | {int(k.split(':')[0]) for k, v in (state.get('paraNotes') or {}).items() if v}
-                for k, v in res.items():
-                    try: p = int(k) - 1
-                    except ValueError: continue
-                    if p in used or not (0 <= p < len(pages)) or not isinstance(v, list): continue     # 已經畫線／翻譯過的頁不動（位置會跑掉）
-                    v = [re.sub(r'\s+', ' ', str(x)).strip() for x in v if str(x).strip()]
-                    before = len(re.sub(r'\s', '', ''.join(raw[p])))
-                    if before and len(re.sub(r'\s', '', ''.join(v))) < before * 0.6: continue      # 少太多字：不信任，留原本的
-                    pages[p] = v
-                write_json(pf, pages)
-        nxt = i
-        update_book(bid, ai={'status': 'running', 'step': 'pages', 'next': nxt, 'total': total, 'metaDone': True, 'rev': int(time.time())})
-    update_book(bid, ai={'status': 'done', 'next': total, 'total': total, 'metaDone': True, 'rev': int(time.time())})
+    pages = read_json(os.path.join(d, 'pages.json')) or []
+    update_book(bid, ai={'status': 'running'})
+    try: m = ai_meta(b, pages, ix['categories'])
+    except RuntimeError as e:
+        update_book(bid, ai={'status': 'error', 'error': str(e)[:300]}); return
+    with LOCK:
+        ix = load_index(); b = find_book(ix, bid)
+        if not b: return
+        ed = set(b.get('edited') or [])                     # 使用者自己改過的欄位：不蓋掉
+        if 'title' not in ed and str(m.get('title') or '').strip(): b['title'] = str(m['title']).strip()[:300]
+        if 'author' not in ed and str(m.get('author') or '').strip(): b['author'] = str(m['author']).strip()[:200]
+        if 'category' not in ed and m.get('category') in ix['categories']: b['category'] = m['category']
+        if 'tags' not in ed and isinstance(m.get('tags'), list): b['tags'] = [str(t).strip()[:40] for t in m['tags'][:3] if str(t).strip()]
+        cp = m.get('coverPage'); cover_job = isinstance(cp, int) and 1 <= cp <= min(5, len(pages)) and not b.get('coverUser')
+        b['ai'] = {'status': 'done'}; save_index(ix)
+    if cover_job:
+        DOCLING_READY.wait(900)
+        if render_cover(bid, cp): update_book(bid, cover=True, coverV=int(time.time() * 1000))
+
+
+def ai_clean_page(pg):
+    """用 AI 整理一頁：圖表之間的每一段文字各自整理，圖表留在原位"""
+    segs, cur = [], []
+    for x in pg:
+        if is_text(x): cur.append(x)
+        else: segs.append(cur); segs.append(x); cur = []
+    segs.append(cur)
+    chunk = {str(i): s for i, s in enumerate(segs) if isinstance(s, list) and s}
+    if not chunk: return pg
+    prompt = ('These are paragraphs extracted from one page of a PDF book (JSON: key -> list of paragraphs; keys are separate text '
+              'blocks around figures). The extraction may have broken paragraphs in the wrong places, hyphenated line-break words, '
+              'running headers/footers, page numbers, OCR noise and stray figure labels. Return the cleaned list of paragraphs for each key: '
+              'merge pieces that belong to one paragraph, split ones that were wrongly joined, rejoin hyphenated words, keep headings as '
+              'their own paragraphs, remove headers/footers/page numbers/noise. Fix obvious OCR errors (e.g. "Ta king" -> "Taking"), but do '
+              'NOT translate, summarize or reword anything else. Reply with ONLY a JSON object with the same keys.\n\n%s'
+              % json.dumps(chunk, ensure_ascii=False))
+    res = ai_json(prompt, dict, 300)
+    out = []
+    for i, s in enumerate(segs):
+        if not isinstance(s, list): out.append(s); continue
+        v = res.get(str(i))
+        if isinstance(v, list):
+            v = [re.sub(r'\s+', ' ', str(x)).strip() for x in v if str(x).strip()]
+            if len(re.sub(r'\s', '', ''.join(v))) >= len(re.sub(r'\s', '', ''.join(s))) * 0.6: s = v      # 少太多字：不信任
+        out.extend(s)
+    return out
 
 
 class H(BaseHTTPRequestHandler):
@@ -327,6 +564,8 @@ class H(BaseHTTPRequestHandler):
                 ext = parts[1].rsplit('.', 1)[-1]
                 ct = {'js': 'text/javascript', 'css': 'text/css', 'pdf': 'application/pdf', 'svg': 'image/svg+xml', 'png': 'image/png'}.get(ext, 'application/octet-stream')
                 return self.send_file(os.path.join(STATIC, parts[1]), ct)
+            if parts[:1] == ['books'] and len(parts) == 4 and parts[2] == 'figs' and m == 'GET' and re.match(r'^[\w.\-]+\.png$', parts[3]):
+                return self.send_file(os.path.join(book_dir(parts[1]), 'figs', parts[3]), 'image/png')
             if parts[:1] == ['books'] and len(parts) == 3 and m == 'GET':
                 fn = parts[2]
                 if fn not in ('book.pdf', 'cover.jpg'): return self.err(404, 'not found')
@@ -341,6 +580,11 @@ class H(BaseHTTPRequestHandler):
     def api(self, m, p, qs):
         if p == ['library'] and m == 'GET':
             with LOCK: return self.send(200, lib_view(load_index()))
+        if p == ['caps'] and m == 'GET':
+            return self.send(200, {'docling': DOCLING})
+        if p == ['docling'] and m == 'POST':          # 重新試著安裝 Docling
+            if DOCLING['status'] not in ('installing', 'ready'): threading.Thread(target=docling_setup, daemon=True).start()
+            return self.send(200, {'docling': DOCLING})
         if p == ['storage'] and m == 'GET':
             return self.send(200, storage_options())
         if p == ['storage'] and m == 'POST':
@@ -392,14 +636,23 @@ class H(BaseHTTPRequestHandler):
             if sub == 'pages' and m == 'GET':
                 return self.send(200, {'meta': b, 'pages': read_json(os.path.join(d, 'pages.json'), None)})
             if sub == '' and m == 'PATCH':
-                upd = clean_meta(self.body_json())
+                body = self.body_json(); upd = clean_meta(body)
                 with LOCK:
                     ix = load_index(); b = find_book(ix, bid)
+                    if body.get('byUser'):                  # 使用者在「詳細資料」改過的欄位：AI 之後不再蓋掉
+                        ed = set(b.get('edited') or [])
+                        for k in ('title', 'author', 'category', 'tags'):
+                            if k in upd and upd[k] != b.get(k): ed.add(k)
+                        b['edited'] = sorted(ed)
                     if 'lastPage' in upd: b['opened'] = int(time.time() * 1000)
                     if upd.get('lastPage') and b.get('status') == 'unread' and 'status' not in upd: upd['status'] = 'reading'
                     b.update(upd); save_index(ix)
                 return self.send(200, b)
             if sub == '' and m == 'DELETE':
+                pr = PARSE_PROC.get(bid)
+                if pr:
+                    try: pr.kill()
+                    except Exception: pass
                 with LOCK:
                     ix = load_index(); ix['books'] = [x for x in ix['books'] if x['id'] != bid]; save_index(ix)
                     shutil.rmtree(d, ignore_errors=True)
@@ -408,26 +661,42 @@ class H(BaseHTTPRequestHandler):
                 pages = self.body_json().get('pages')
                 if not isinstance(pages, list): return self.err(400, 'pages 格式不對')
                 pages = [[str(x) for x in pg] if isinstance(pg, list) else [] for pg in pages]
-                write_json(os.path.join(d, 'pages.json'), pages); write_json(os.path.join(d, 'pages_raw.json'), pages)
-                b = update_book(bid, pages=len(pages), hasText=sum(len(''.join(pg)) for pg in pages) > 40)
+                write_json(os.path.join(d, 'pages_raw.json'), pages)
+                pages = clean_pages(pages)
+                write_json(os.path.join(d, 'pages.json'), pages)
+                b = update_book(bid, pages=len(pages), hasText=sum(len(page_text(pg)) for pg in pages) > 40)
                 return self.send(200, b)
-            if sub == 'ai' and m == 'POST':          # 開始（或重新開始）AI 整理
-                if (b.get('ai') or {}).get('status') == 'running': return self.send(200, b)
-                if not b.get('hasText'): return self.err(400, '這本 PDF 抽不出文字，沒辦法整理')
-                again = bool(self.body_json().get('restart'))
-                b = update_book(bid, ai={'status': 'queued', 'next': 0 if again else int((b.get('ai') or {}).get('next') or 0),
-                                         'total': b.get('pages') or 0, 'metaDone': False if again else (b.get('ai') or {}).get('metaDone')})
-                AIQ.put(bid)
+            if sub == 'parse' and m == 'POST':       # 用 Docling 解析（匯入後自動叫；「詳細資料」可以重新解析）
+                if (b.get('parse') or {}).get('status') in ('running', 'queued') and not self.body_json().get('restart'): return self.send(200, b)
+                return self.send(200, start_parse(bid, restart=True))
+            if sub == 'ai' and m == 'POST':          # AI 判斷書名、作者、分類、標籤、封面
+                if (b.get('ai') or {}).get('status') in ('running', 'queued'): return self.send(200, b)
+                if not b.get('hasText'): return self.err(400, '這本 PDF 抽不出文字，AI 沒辦法判斷')
+                b = update_book(bid, ai={'status': 'queued'}); AIQ.put(bid)
                 return self.send(200, b)
+            if sub == 'ai-page' and m == 'POST':     # 用 AI 整理某一頁
+                pno = int(self.body_json().get('page') or 0)
+                with LOCK:
+                    pages = read_json(os.path.join(d, 'pages.json')) or []
+                    if not (0 <= pno < len(pages)): return self.err(400, '沒有這一頁')
+                    if pno in used_pages(read_json(os.path.join(d, 'state.json'), {})): return self.err(409, '這一頁已經有螢光筆、筆記或翻譯，整理後位置會跑掉')
+                    pg = pages[pno]
+                try: new = ai_clean_page(pg)
+                except RuntimeError as e: return self.err(502, str(e))
+                with LOCK:
+                    pages = read_json(os.path.join(d, 'pages.json')) or []
+                    if pno in used_pages(read_json(os.path.join(d, 'state.json'), {})): return self.err(409, '這一頁剛剛加了標記，沒有套用')
+                    pages[pno] = new; write_json(os.path.join(d, 'pages.json'), pages)
+                return self.send(200, {'page': new})
             if sub == 'cover' and m == 'PUT':
                 data = self.body_bytes()
                 if data[:2] != b'\xff\xd8': return self.err(400, '封面要是 JPEG')
                 with open(os.path.join(d, 'cover.jpg'), 'wb') as f: f.write(data)
-                return self.send(200, update_book(bid, cover=True, coverV=int(time.time() * 1000)))
+                return self.send(200, update_book(bid, cover=True, coverV=int(time.time() * 1000), coverUser=bool(qs.get('user'))))
             if sub == 'cover' and m == 'DELETE':           # 不用圖片，改用設計好的封面（書名＋作者）
                 try: os.remove(os.path.join(d, 'cover.jpg'))
                 except OSError: pass
-                return self.send(200, update_book(bid, cover=False, coverV=int(time.time() * 1000)))
+                return self.send(200, update_book(bid, cover=False, coverV=int(time.time() * 1000), coverUser=True))
             if sub == 'state' and m == 'PUT':
                 st = self.body_json()
                 if not isinstance(st, dict): return self.err(400, 'state 格式不對')
@@ -453,9 +722,12 @@ class H(BaseHTTPRequestHandler):
 def main():
     os.makedirs(LIB, exist_ok=True)
     threading.Thread(target=ai_worker, daemon=True).start()
-    with LOCK:                                   # 上次沒做完的 AI 整理：接著做
+    threading.Thread(target=parse_worker, daemon=True).start()
+    threading.Thread(target=docling_setup, daemon=True).start()
+    with LOCK:                                   # 上次沒做完的：接著做
         for b in load_index()['books']:
             if (b.get('ai') or {}).get('status') in ('running', 'queued'): AIQ.put(b['id'])
+            if (b.get('parse') or {}).get('status') in ('running', 'queued'): PARSEQ.put(b['id'])
     srv = ThreadingHTTPServer(('127.0.0.1', PORT), H)
     url = 'http://localhost:%d' % PORT
     print('Readiverse 已啟動：%s\n書庫：%s\n要關掉請按 Ctrl+C' % (url, LIB))

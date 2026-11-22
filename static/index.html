@@ -224,6 +224,16 @@ mark.hl.lit{box-shadow:0 0 0 2px var(--ink)}
 .addn{align-self:flex-start;opacity:0;transition:opacity .12s;border:1px dashed var(--line);background:none;color:var(--muted);font-size:12px;min-height:26px;padding:2px 9px}
 .r2.hov .addn,.addn:focus-visible{opacity:1}
 @media (hover:none){.addn{opacity:.7}}
+.fig{margin:10px auto 14px;max-width:860px;padding-left:32px;display:flex;flex-direction:column;gap:6px}
+.fig img{max-width:100%;max-height:70vh;width:auto;height:auto;object-fit:contain;align-self:center;border-radius:6px;cursor:zoom-in;background:#fff;border:1px solid var(--line)}
+.fig figcaption{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;justify-content:center;text-align:center}
+.tblw{overflow-x:auto}
+.tbl{border-collapse:collapse;margin:0 auto;font-family:var(--f-read);font-size:calc(var(--fs) - 3px)}
+.tbl th,.tbl td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+.tbl th{background:var(--soft);font-weight:600}
+.aipg{width:28px;height:28px;margin-left:8px;color:var(--muted)}
+.aipg:hover:not(:disabled){color:var(--acc)}
+.rhead .L{align-items:center!important}
 .notext{border:1.5px dashed var(--line);border-radius:12px;padding:28px;text-align:center;color:var(--muted)}
 #pdfView{display:flex;justify-content:center;padding:22px 12px 40px}
 #pdfView canvas{max-width:100%;height:auto;border:1px solid var(--line);box-shadow:0 2px 10px rgba(0,0,0,.06)}
@@ -339,11 +349,17 @@ $('themeBtn').onclick=()=>setTheme(isDark()?'light':'dark');
    書庫
    ===================================================================== */
 let LIB={books:[],categories:[]}, FILTER=LS.get('filter2','home'), VIEW=LS.get('view2','grid'), SORT=LS.get('sort','opened');
-async function loadLib(){ LIB=await api.get('/api/library'); renderLib(); }
-function aiTag(b){ const a=b.ai||{}; if(a.status==='running'||a.status==='queued') return `<span class="aist"><span class="spin"></span>AI 整理中${a.total?` ${Math.min(a.next||0,a.total)}/${a.total} 頁`:''}</span>`;
-  if(a.status==='error') return `<span class="aist bad" title="${esc(a.error||'')}">AI 整理失敗</span>`; return ''; }
+async function loadLib(){ await loadCaps(); LIB=await api.get('/api/library'); renderLib(); }
+function aiTag(b){ const a=b.ai||{}, r=b.parse||{}, sp='<span class="spin"></span>';
+  if(r.status==='running') return `<span class="aist" title="Docling 在背景解析版面：分段、圖片、表格">${sp}版面解析中${r.total?` ${Math.min(r.next||0,r.total)}/${r.total} 頁`:''}</span>`;
+  if(r.status==='queued') return `<span class="aist">${sp}${CAPS.docling&&CAPS.docling.status==='installing'?'等 Docling 安裝好':'等待版面解析'}</span>`;
+  if(a.status==='running'||a.status==='queued') return `<span class="aist">${sp}AI 判斷書名、分類中</span>`;
+  if(r.status==='error') return `<span class="aist bad" title="${esc(r.error||'')}">版面解析失敗</span>`;
+  if(a.status==='error') return `<span class="aist bad" title="${esc(a.error||'')}">AI 判斷失敗</span>`; return ''; }
+const busy=b=>['running','queued'].includes((b.ai||{}).status)||['running','queued'].includes((b.parse||{}).status);
+let CAPS={}; async function loadCaps(){ try{ CAPS=await api.get('/api/caps'); }catch(e){} }
 let libPollT=null;
-function pollLib(){ clearTimeout(libPollT); if(LIB.books.some(b=>['running','queued'].includes((b.ai||{}).status))) libPollT=setTimeout(async()=>{ if(!$('vLib').hidden){ try{ LIB=await api.get('/api/library'); renderLib(true); }catch(e){} } else pollLib(); },4000); }
+function pollLib(){ clearTimeout(libPollT); if(LIB.books.some(busy)) libPollT=setTimeout(async()=>{ if(!$('vLib').hidden){ try{ await loadCaps(); LIB=await api.get('/api/library'); renderLib(true); }catch(e){} } else pollLib(); },4000); }
 function prog(b){ return b.pages?Math.min(1,(b.lastPage+1)/b.pages):0; }
 const byOpened=(a,b)=>(b.opened||b.added)-(a.opened||a.added);
 const SORTS={opened:byOpened,added:(a,b)=>b.added-a.added,title:(a,b)=>a.title.localeCompare(b.title,'zh-Hant'),progress:(a,b)=>prog(b)-prog(a)};
@@ -455,6 +471,9 @@ function renderMenu(){
 $('avBtn').onclick=e=>{ e.stopPropagation(); const m=$('menu'); m.hidden=!m.hidden; $('avBtn').setAttribute('aria-expanded',String(!m.hidden)); };
 $('menu').onclick=e=>{ if(e.target.closest('[data-m="set"]')){ $('menu').hidden=true; openSettings(); } };
 document.addEventListener('click',e=>{ if(!e.target.closest('#menu,#avBtn')) $('menu').hidden=true; });
+function docHtml(){ const d=CAPS.docling||{};
+  return '版面解析（Docling：分段、圖片、表格）：'+(d.status==='ready'?'✓ 可以用':d.status==='installing'?'<span class="spin"></span>第一次使用，正在安裝（約 2 GB，幾分鐘）':d.status==='checking'?'檢查中…':`<span class="err">${esc(d.error||'不能用')}</span> <button type="button" class="small" data-docretry>重新安裝</button>`); }
+document.addEventListener('click',async e=>{ if(e.target.closest('[data-docretry]')){ try{ CAPS=await api.post('/api/docling',{}); }catch(err){} const x=$('sDoc'); if(x) x.innerHTML=docHtml(); } });
 function openSettings(){
   const d=$('dlg'), th=document.documentElement.getAttribute('data-theme')||'';
   const catRows=LIB.categories.map(c=>`<div class="catrow"><input type="text" value="${esc(c)}" data-old="${esc(c)}" aria-label="分類名稱"><button type="button" class="ib danger" data-rmcat="${esc(c)}" title="刪除分類" aria-label="刪除分類 ${esc(c)}">×</button></div>`).join('')||'<div class="note">還沒有分類。</div>';
@@ -462,7 +481,8 @@ function openSettings(){
     <div class="fld"><label class="label" for="sName">你的名字</label><input type="text" id="sName" value="${esc((LIB.profile||{}).name||'')}" maxlength="40" placeholder="顯示在首頁"></div>
     <div class="row" style="gap:10px"><div class="fld grow"><label class="label" for="sTheme">外觀</label><select id="sTheme"><option value="light">淺色</option><option value="dark"${th==='dark'?' selected':''}>深色</option><option value="system"${th==='system'?' selected':''}>跟系統一樣</option></select></div>
     <div class="fld grow"><label class="label" for="sFs">閱讀字體大小</label><select id="sFs">${[14,15,16,17,18,19,20,22,24,26,28].map(v=>`<option${v===FS?' selected':''}>${v}</option>`).join('')}</select></div></div>
-    <label class="row" style="margin-bottom:14px;font-size:14px;flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="sAi"${LS.get('aiParse',true)?' checked':''} style="margin-top:5px"> 匯入 PDF 時用 AI 整理（自動填書名、作者、分類，重新分段、拿掉頁首頁尾）</label>
+    <label class="row" style="margin-bottom:10px;font-size:14px;flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="sAi"${LS.get('aiParse',true)?' checked':''} style="margin-top:5px"> 匯入時用 AI 自動填書名、作者、分類、標籤、封面（只問一次；你改過的不會被蓋掉）</label>
+    <div class="note" id="sDoc" style="margin-bottom:14px">${docHtml()}</div>
     <div class="fld"><span class="label">分類（直接改名字，書會跟著走）</span><div id="sCats">${catRows}</div></div>
     <div class="fld"><span class="label">書庫存放位置</span><div class="stor" id="sStor"><span class="note"><span class="spin"></span>找雲端硬碟…</span></div>
       <span class="note">放在 Google 雲端硬碟或 OneDrive，換電腦打開就是同一份書和筆記（要先裝好它們的電腦版）。</span></div>
@@ -501,19 +521,20 @@ function editBook(id){
     <div class="fld grow"><label class="label" for="eS">狀態</label><select id="eS">${Object.entries(STATUS).map(([k,v])=>`<option value="${k}"${k===b.status?' selected':''}>${v}</option>`).join('')}</select></div></div>
     <div class="fld"><label class="label" for="eG">標籤（用逗號分開）</label><input type="text" id="eG" value="${esc((b.tags||[]).join(', '))}"></div>
     <label class="row" style="margin-bottom:12px;font-size:14px"><input type="checkbox" id="eF"${b.favorite?' checked':''}> 加到最愛 ★</label>
-    ${b.hasText?`<div class="row" style="margin-bottom:16px"><button type="button" class="small" id="eAi"${['running','queued'].includes((b.ai||{}).status)?' disabled':''}>用 AI 重新整理段落</button>${aiTag(b)}<span class="note">畫過螢光筆或翻譯過的頁不會動</span></div>`:''}
+    <div class="row" style="margin-bottom:16px;gap:6px"><button type="button" class="small" id="eParse"${busy(b)?' disabled':''} title="用 Docling 重新解析整本書的版面（畫過螢光筆、寫過筆記、翻譯過的頁不會動）">重新解析版面</button>${b.hasText?`<button type="button" class="small" id="eAi"${busy(b)?' disabled':''} title="用 AI 重新判斷書名、作者、分類、標籤、封面（你改過的欄位不會被蓋掉）">AI 重新判斷資料</button>`:''}${aiTag(b)}</div>
     <div class="row" style="justify-content:space-between"><button type="button" class="danger" id="eDel">刪除這本書</button><span class="row"><button type="button" id="eNo">取消</button><button class="primary" value="ok">儲存</button></span></div></form>`;
   d.showModal(); $('eNo').onclick=()=>d.close();
   const setCv=async(req)=>{ try{ toast('<span class="spin"></span>更新封面…',0); Object.assign(b,await req); $('eCv').innerHTML=designCover(b)+coverImg(b); $('eCvD').disabled=!hasCover(b); renderLib(true); toast('封面已更新'); }catch(e){ toast('封面更新失敗：'+esc(e.message),5000); } };
   $('eCvF').onchange=async e=>{ const f=e.target.files[0]; if(!f) return; const img=new Image(); img.src=URL.createObjectURL(f); try{ await img.decode(); }catch(err){ return toast('讀不到這張圖'); }
     const c=document.createElement('canvas'), sc=Math.min(1,720/img.naturalWidth); c.width=img.naturalWidth*sc; c.height=img.naturalHeight*sc; const g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height); g.drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(img.src);
-    setCv(new Promise(r=>c.toBlob(r,'image/jpeg',.86)).then(bl=>api.put(`/api/books/${id}/cover`,bl,true))); };
+    setCv(new Promise(r=>c.toBlob(r,'image/jpeg',.86)).then(bl=>api.put(`/api/books/${id}/cover?user=1`,bl,true))); };
   $('eCvP').onclick=()=>setCv((async()=>{ const pdf=await pdfjsLib.getDocument(`/books/${id}/book.pdf`).promise; try{ const n=Math.max(1,Math.min(pdf.numPages,$('eCvN').value|0)), pg=await pdf.getPage(n), v0=pg.getViewport({scale:1}), vp=pg.getViewport({scale:480/v0.width});
-    const c=document.createElement('canvas'); c.width=vp.width; c.height=vp.height; await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise; const bl=await new Promise(r=>c.toBlob(r,'image/jpeg',.84)); return api.put(`/api/books/${id}/cover`,bl,true); } finally{ pdf.destroy(); } })());
+    const c=document.createElement('canvas'); c.width=vp.width; c.height=vp.height; await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise; const bl=await new Promise(r=>c.toBlob(r,'image/jpeg',.84)); return api.put(`/api/books/${id}/cover?user=1`,bl,true); } finally{ pdf.destroy(); } })());
   $('eCvD').onclick=()=>setCv(api.del(`/api/books/${id}/cover`));
-  if($('eAi')) $('eAi').onclick=async()=>{ try{ Object.assign(b,await api.post(`/api/books/${id}/ai`,{restart:true})); d.close(); renderLib(); toast('AI 開始整理《'+esc(b.title)+'》'); }catch(e){ toast(esc(e.message),5000); } };
+  if($('eAi')) $('eAi').onclick=async()=>{ try{ Object.assign(b,await api.post(`/api/books/${id}/ai`,{})); d.close(); renderLib(true); toast('AI 開始判斷《'+esc(b.title)+'》的資料'); }catch(e){ toast(esc(e.message),5000); } };
+  $('eParse').onclick=async()=>{ try{ Object.assign(b,await api.post(`/api/books/${id}/parse`,{restart:true})); d.close(); renderLib(true); toast('開始重新解析《'+esc(b.title)+'》'); }catch(e){ toast(esc(e.message),5000); } };
   $('eDel').onclick=async()=>{ if(!confirm(`確定刪除《${b.title}》？\nPDF、螢光筆、筆記、翻譯都會一起刪掉，不能復原。`)) return; await api.del(`/api/books/${id}`); d.close(); LIB.books=LIB.books.filter(x=>x.id!==id); renderLib(); toast('已刪除'); };
-  $('edF').onsubmit=async e=>{ e.preventDefault(); const u=await api.patch(`/api/books/${id}`,{title:$('eT').value,author:$('eA').value,category:$('eC').value,status:$('eS').value,favorite:$('eF').checked,tags:$('eG').value.split(/[,，]/)});
+  $('edF').onsubmit=async e=>{ e.preventDefault(); const u=await api.patch(`/api/books/${id}`,{byUser:true,title:$('eT').value,author:$('eA').value,category:$('eC').value,status:$('eS').value,favorite:$('eF').checked,tags:$('eG').value.split(/[,，]/)});
     Object.assign(b,u); d.close(); renderLib(); if(BOOK&&BOOK.meta.id===id){ BOOK.meta=b; $('rTitle').textContent=b.title; } };
 }
 
@@ -568,10 +589,11 @@ async function importFiles(files){
         await p1.render({canvasContext:c.getContext('2d'),viewport:vp}).promise; const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.82)); Object.assign(meta,await api.put(`/api/books/${meta.id}/cover`,blob,true)); }catch(e){ console.warn('cover',e); }
       const m2=await api.put(`/api/books/${meta.id}/pages`,{pages});
       Object.assign(meta,m2); if(Object.keys(patch).length) Object.assign(meta,await api.patch(`/api/books/${meta.id}`,patch));
+      try{ Object.assign(meta,await api.post(`/api/books/${meta.id}/parse`,{})); }catch(e){ console.warn('parse',e); }
       if(useAi&&meta.hasText){ try{ Object.assign(meta,await api.post(`/api/books/${meta.id}/ai`,{})); }catch(e){ console.warn('ai',e); } }
       LIB.books=[meta,...LIB.books.filter(x=>x.id!==meta.id)]; renderLib();
       pdf.destroy();
-      toast(meta.hasText?`已匯入《${esc(meta.title)}》，共 ${meta.pages} 頁${useAi?'；AI 在背景整理書名、分類和段落，可以先開始讀':''}`:`已匯入《${esc(meta.title)}》，但這個 PDF 是掃描圖片、抽不出文字：只能看原始頁面`,meta.hasText?3000:6000);
+      toast(meta.hasText?`已匯入《${esc(meta.title)}》，共 ${meta.pages} 頁；背景會再解析版面（圖片、表格）${useAi?'、用 AI 填書名和分類':''}，可以先開始讀`:`已匯入《${esc(meta.title)}》，但這個 PDF 是掃描圖片、抽不出文字：只能看原始頁面`,meta.hasText?3000:6000);
     }catch(e){ console.error(e); toast('匯入失敗：'+esc(e.message),6000); }
   }
 }
@@ -601,7 +623,7 @@ async function openBook(id){
 }
 let rdPollT=null;
 function readerAi(){ clearTimeout(rdPollT); if(!BOOK) return; $('rAi').innerHTML=aiTag(BOOK.meta);
-  if(!['running','queued'].includes((BOOK.meta.ai||{}).status)) return;
+  if(!busy(BOOK.meta)) return;
   const id=BOOK.meta.id; rdPollT=setTimeout(async()=>{ if(!BOOK||BOOK.meta.id!==id) return; let j; try{ j=await api.get(`/api/books/${id}/pages`); }catch(e){ return readerAi(); }
     if(!BOOK||BOOK.meta.id!==id) return; const old=JSON.stringify(BOOK.pages[PG]||[]); BOOK.pages=j.pages||BOOK.pages; Object.assign(BOOK.meta,j.meta); $('rTitle').textContent=BOOK.meta.title;
     const sel=getSelection(), busy=POP||(sel&&!sel.isCollapsed)||(document.activeElement&&document.activeElement.closest('#sheet textarea,#sheet [contenteditable]'));
@@ -675,7 +697,7 @@ const mkey=(p,i)=>p+':'+i;
 function paras(p){ return BOOK.pages[p]||[]; }
 function cardsOfPage(p){      // 這一頁的螢光筆（同一則筆記跨好幾段的合成一張），放在第一段旁邊
   const by=new Map(), P=BOOK.pages[p]||[];
-  P.forEach((t,i)=>(ST.marks[mkey(p,i)]||[]).forEach(r=>{ const key=r[3]||(i+':'+r[0]); let o=by.get(key); if(!o){ o={key,nid:r[3],c:r[2],i,s:r[0],q:[],page:p}; by.set(key,o); } o.q.push(t.slice(r[0],r[1]).trim()); }));
+  P.forEach((t,i)=>typeof t==='string'&&(ST.marks[mkey(p,i)]||[]).forEach(r=>{ const key=r[3]||(i+':'+r[0]); let o=by.get(key); if(!o){ o={key,nid:r[3],c:r[2],i,s:r[0],q:[],page:p}; by.set(key,o); } o.q.push(t.slice(r[0],r[1]).trim()); }));
   const L=[...by.values()].map(o=>({...o,quote:o.q.join(' … ')}));
   const used=new Set(L.map(o=>o.nid).filter(Boolean));     // 螢光筆清掉了但筆記還在
   Object.entries(ST.notes).forEach(([id,n])=>{ if(n.page===p&&!used.has(id)) L.push({key:id,nid:id,c:0,i:Math.max(0,n.i|0),s:0,quote:n.quote||'',page:p,orphan:true}); });
@@ -695,18 +717,29 @@ function zhHtml(i){ if(!ZH) return ''; const Z=ST.zh[PG];
   if(i===0&&TR[PG]) return '<div class="zh wait"><span class="spin"></span>AI 翻譯中…</div>';
   if(i===0&&TR_ERR[PG]) return `<div class="zh err">${esc(TR_ERR[PG])} <button type="button" class="small" data-retr>再試一次</button></div>`;
   return ''; }
+const isTxt=x=>typeof x==='string';
+function figHtml(x,i){ const src=`/books/${BOOK.meta.id}/figs/${encodeURIComponent(x.src)}`, tab=x.t==='table'&&x.rows&&x.rows.length, mode=LS.get('tblImg',false);
+  const table=tab?`<div class="tblw"><table class="tbl">${x.rows.map((r,j)=>`<tr>${r.map(c=>j===0?`<th>${esc(c)}</th>`:`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table></div>`:'';
+  return `<figure class="fig" id="en${i}">${tab&&!mode?table:`<img src="${src}" alt="${esc(x.cap||'圖')}" loading="lazy" data-zoom="${src}" style="aspect-ratio:${x.w||4}/${x.h||3}">`}
+    <figcaption>${x.cap?esc(x.cap):''}${tab?`<button type="button" class="ib ghost" data-tblmode title="${mode?'顯示成表格（可以選取文字）':'顯示原始截圖'}" aria-label="切換表格／截圖">${mode?'▦':'🖼'}</button>`:''}</figcaption></figure>`; }
 function renderPage(){
-  const P=paras(PG), sh=$('sheet'), n=nPages();
+  const P=paras(PG), sh=$('sheet'), n=nPages(); let tn=0;
+  const used=pageUsed(PG), aiBusy=AIPG[PG];
   const cards=cardsOfPage(PG).filter(o=>o.nid&&ST.notes[o.nid]), byPara={}; cards.forEach(o=>(byPara[o.i]=byPara[o.i]||[]).push(o));
   const pn=ST.pageNotes[PG];
   let h=`<div class="gut" role="separator" aria-orientation="vertical" aria-label="拖曳調整左右寬度" tabindex="0"></div>
-    <div class="r2 rhead"><div class="L"><span class="pgsep">第 ${PG+1} 頁 ／ 共 ${n} 頁</span></div><div class="R"><textarea id="pgNote" rows="1" placeholder="這一頁的筆記…" aria-label="這一頁的筆記">${esc(pn||'')}</textarea></div></div>`;
+    <div class="r2 rhead"><div class="L"><span class="pgsep">第 ${PG+1} 頁 ／ 共 ${n} 頁</span>${P.some(isTxt)?`<button type="button" class="ib ghost aipg" data-aipage${used||aiBusy?' disabled':''} title="${used?'這一頁已經有螢光筆、筆記或翻譯，不能再重新整理':aiBusy?'AI 整理中…':'這一頁排版怪怪的？用 AI 整理這一頁（重新分段、修正 OCR 錯字）'}" aria-label="用 AI 整理這一頁">${aiBusy?'<span class="spin"></span>':'<svg class="i" viewBox="0 0 24 24"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 15l.6 1.4L7 17l-1.4.6L5 19l-.6-1.4L3 17l1.4-.6z"/></svg>'}</button>`:''}${AIPG_ERR[PG]?`<span class="err" style="margin-left:8px">${esc(AIPG_ERR[PG])}</span>`:''}</div><div class="R"><textarea id="pgNote" rows="1" placeholder="這一頁的筆記…" aria-label="這一頁的筆記">${esc(pn||'')}</textarea></div></div>`;
   if(!P.length) h+=`<div class="r2"><div class="L"><div class="notext">${BOOK.meta.hasText?'這一頁沒有文字（可能是圖片或空白頁）。':'這本 PDF 是掃描圖片，抽不出文字。'}<br><button type="button" class="small" style="margin-top:10px" data-mode-go="pdf">看原始頁面</button></div></div><div class="R"></div></div>`;
-  else h+=P.map((t,i)=>`<div class="r2" data-i="${i}"><div class="L"><div class="para" id="en${i}"><span class="no">${i+1}</span><div class="ptx" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div>
+  else h+=P.map((t,i)=>!isTxt(t)?`<div class="r2"><div class="L">${figHtml(t,i)}</div><div class="R"></div></div>`:`<div class="r2" data-i="${i}"><div class="L"><div class="para" id="en${i}"><span class="no">${++tn}</span><div class="ptx" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div>
     <div class="R">${(byPara[i]||[]).map(o=>cardHtml(o)).join('')}${paraNoteHtml(PG,i)}</div></div>`).join('');
   h+=`<div class="rfoot"><button type="button" data-turn="-1"${PG<=0?' disabled':''}>← 上一頁</button><div class="bar" title="讀到 ${PG+1} / ${n} 頁"><i style="width:${Math.round((PG+1)/n*100)}%"></i></div><span class="pc">${PG+1} / ${n}</span><button type="button" data-turn="1"${PG>=n-1?' disabled':''}>下一頁 →</button></div>`;
   sh.innerHTML=h; sh.querySelectorAll('textarea').forEach(autoGrow);
 }
+function pageUsed(p){ return Object.keys(ST.marks).some(k=>k.startsWith(p+':')&&ST.marks[k].length)||Object.keys(ST.paraNotes).some(k=>k.startsWith(p+':'))||!!ST.zh[p]||Object.values(ST.notes).some(x=>x.page===p); }
+const AIPG={}, AIPG_ERR={};
+async function aiPage(p){ const id=BOOK.meta.id; AIPG[p]=1; delete AIPG_ERR[p]; renderPage();
+  try{ const j=await api.post(`/api/books/${id}/ai-page`,{page:p}); if(BOOK&&BOOK.meta.id===id){ BOOK.pages[p]=j.page; toast('這一頁整理好了'); } }
+  catch(e){ AIPG_ERR[p]=e.message; } finally{ delete AIPG[p]; if(BOOK&&BOOK.meta.id===id&&p===PG&&MODE==='text') renderPage(); } }
 function autoGrow(t){ t.style.height='auto'; t.style.height=Math.max(t.scrollHeight+2,38)+'px'; }
 
 /* ---------- 選取 → 螢光筆 ---------- */
@@ -766,6 +799,9 @@ $('sheet').addEventListener('click',e=>{
   const t=e.target;
   const g=t.closest('[data-mode-go]'); if(g){ MODE=g.dataset.modeGo; LS.set('mode',MODE); return showPage(PG); }
   const tn=t.closest('[data-turn]'); if(tn) return showPage(PG+(+tn.dataset.turn));
+  if(t.closest('[data-aipage]')) return aiPage(PG);
+  if(t.closest('[data-tblmode]')){ LS.set('tblImg',!LS.get('tblImg',false)); return renderPage(); }
+  const zm=t.closest('[data-zoom]'); if(zm){ const d=$('dlg'); d.innerHTML=`<img src="${zm.dataset.zoom}" alt="" style="max-width:100%;display:block;margin:0 auto">${zm.alt?`<p class="note" style="text-align:center">${esc(zm.alt)}</p>`:''}<div class="row" style="justify-content:flex-end"><button type="button" onclick="this.closest('dialog').close()">關閉</button></div>`; d.style.width='min(980px,calc(100vw - 32px))'; d.showModal(); d.addEventListener('close',()=>d.style.width='',{once:true}); return; }
   if(t.closest('[data-retr]')){ delete TR_ERR[PG]; ensureZh(PG).catch(()=>{}); return; }
   const ap=t.closest('[data-pnote]'); if(ap){ const i=+ap.dataset.pnote; ap.outerHTML=paraNoteHtml(PG,i,true); const ta=document.querySelector(`[data-pnt="${i}"]`); if(ta){ autoGrow(ta); ta.focus(); } return; }
   const rp=t.closest('[data-rmpn]'); if(rp){ const k=mkey(PG,+rp.dataset.rmpn); if(String(ST.paraNotes[k]||'').trim()&&!confirm('刪除這段的筆記？')) return; delete ST.paraNotes[k]; save(); return renderPage(); }
@@ -809,10 +845,10 @@ addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'
 
 /* ---------- 中文（在英文底下） ---------- */
 async function ensureZh(p,force){
-  if(!BOOK||p<0||p>=nPages()) return; const P=paras(p); if(!P.length||(ST.zh[p]&&!force)) return; if(TR[p]) return TR[p];
+  if(!BOOK||p<0||p>=nPages()) return; const P=paras(p), idx=P.map((x,i)=>isTxt(x)?i:-1).filter(i=>i>=0); if(!idx.length||(ST.zh[p]&&!force)) return; if(TR[p]) return TR[p];
   if(TR_ERR[p]&&!force&&p!==PG) return;
   const id=BOOK.meta.id; delete TR_ERR[p];
-  TR[p]=api.post(`/api/books/${id}/translate`,{paras:P}).then(j=>{ if(BOOK&&BOOK.meta.id===id){ ST.zh[p]=j.zh; save(); } })
+  TR[p]=api.post(`/api/books/${id}/translate`,{paras:idx.map(i=>P[i])}).then(j=>{ if(BOOK&&BOOK.meta.id===id){ const z=P.map(()=>''); idx.forEach((i,k)=>z[i]=j.zh[k]||''); ST.zh[p]=z; save(); } })
     .catch(e=>{ TR_ERR[p]=e.message; throw e; }).finally(()=>{ delete TR[p]; if(BOOK&&BOOK.meta.id===id&&p===PG&&ZH&&MODE==='text'&&!(document.activeElement&&document.activeElement.closest('#sheet textarea'))) renderPage(); });
   if(p===PG&&MODE==='text') renderPage(); return TR[p]; }
 

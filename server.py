@@ -802,7 +802,9 @@ def proof_job(bid):
         update_book(bid, proof={'status': 'running', 'phase': 'fast', 'done': len(want) - len(todo), 'total': len(want)})
         run_round(todo, 'fast', 3)
     if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
-    # 第 2 輪：Sonnet 抽查
+    # 第 2 輪：Sonnet 抽查（這本書設定成只做第 1 輪就跳過；之後可以再單獨補做）
+    if (find_book(load_index(), bid) or {}).get('proofFastOnly'):
+        update_book(bid, proof={'status': 'done', 'done': len(textp), 'total': len(textp), 'rev': int(time.time() * 1000), 'bestPending': True}); return
     lost = read_json(os.path.join(d, 'lost.json'), {}) or {}
     with LOCK: pages = read_json(os.path.join(d, 'pages.json')) or []
     flagged = {int(k) - 1 for k in lost if str(k).isdigit()} | set(bad_pages(pages))

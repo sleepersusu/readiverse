@@ -32,7 +32,7 @@ jobs:
       - name: Install build tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyinstaller pywebview pywinpty pillow
+          python -m pip install pyinstaller pywebview pywinpty pillow certifi
 
       - name: Check the code compiles and works on Windows
         run: |
@@ -53,7 +53,7 @@ jobs:
           python -m PyInstaller --noconfirm --onedir --windowed --name Readiverse --icon assets/icon.ico
           --add-data "static;static" --add-data "assets;assets" --add-data "docling_worker.py;." --add-data "VERSION;."
           --hidden-import server --hidden-import rv_dict --paths .
-          --collect-all webview --collect-all clr_loader --collect-all pythonnet --collect-all winpty --hidden-import clr
+          --collect-all certifi --collect-all webview --collect-all clr_loader --collect-all pythonnet --collect-all winpty --hidden-import clr
           app.py
 
       - name: Smoke test (server and pages)
@@ -73,6 +73,9 @@ jobs:
           Write-Output $l.Substring(0, [Math]::Min(300, $l.Length))
           $s = (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8780/api/storage).Content
           Write-Output $s
+          $u = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8780/api/update?force=1").Content
+          Write-Output $u
+          if ($u -notmatch '"checkError": ""') { Write-Output "::error::打包版連不上 GitHub 查新版"; exit 1 }
           Stop-Process -Id $p.Id -Force
 
       - name: Build installer (Inno Setup)
@@ -140,7 +143,7 @@ jobs:
       - name: Install build tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyinstaller pywebview
+          python -m pip install pyinstaller pywebview certifi
 
       - name: Version file and icon
         run: |
@@ -155,7 +158,7 @@ jobs:
           python -m PyInstaller --noconfirm --windowed --name Readiverse --icon icon.icns \
             --osx-bundle-identifier app.readiverse \
             --add-data "static:static" --add-data "assets:assets" --add-data "docling_worker.py:." --add-data "VERSION:." \
-            --hidden-import server --hidden-import rv_dict --paths . --collect-all webview app.py
+            --hidden-import server --hidden-import rv_dict --paths . --collect-all certifi --collect-all webview app.py
           V=$(cat VERSION); /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${V#v}" dist/Readiverse.app/Contents/Info.plist || true
           codesign --force --deep -s - dist/Readiverse.app
 
@@ -164,7 +167,8 @@ jobs:
           READIVERSE_NO_DOCLING=1 READIVERSE_LIB="$RUNNER_TEMP/rv-lib" dist/Readiverse.app/Contents/MacOS/Readiverse --server &
           for i in $(seq 30); do sleep 2; curl -sf http://127.0.0.1:8780/api/caps && break; done
           curl -sf http://127.0.0.1:8780/ | grep -q Readiverse || { echo "::error::首頁沒有載入"; exit 1; }
-          curl -sf http://127.0.0.1:8780/api/update; echo
+          U=$(curl -sf "http://127.0.0.1:8780/api/update?force=1"); echo "$U"
+          echo "$U" | grep -q '"checkError": ""' || { echo "::error::打包版連不上 GitHub 查新版"; exit 1; }
           kill %1 || true
 
       - name: Zip (auto-update) and dmg (first install)

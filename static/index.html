@@ -560,7 +560,7 @@ async function checkUpdate(force){
 function verHtml(){
   const u=UPDI; if(!u.current) return '<span class="sd">開發版（從原始碼執行）</span>';
   if(!u.can) return `<span class="sd">${esc(u.current)}${/-dev/.test(u.current)?'（自己電腦打包的開發版，不自動更新）':''}</span>`;
-  return (updHtml(u,true)||`<span class="sd">${esc(u.current)}，已經是最新版</span> <button type="button" class="small" data-upd-check>檢查更新</button>`)+(u.error?`<div class="err">${esc(u.error)}</div>`:'');
+  return (updHtml(u,true)||`<span class="sd">${esc(u.current)}${u.checkError?'':'，已經是最新版'}</span> <button type="button" class="small" data-upd-check>檢查更新</button>`)+(u.error?`<div class="err">${esc(u.error)}</div>`:'')+(u.checkError?`<div class="err">${esc(u.checkError)}</div>`:'');
 }
 document.addEventListener('click',async e=>{
   if(e.target.closest('[data-upd-check]')){ const b=e.target.closest('[data-upd-check]'); b.disabled=true; b.textContent='檢查中…'; await checkUpdate(true); return; }
@@ -572,7 +572,7 @@ function aiTag(b){ const a=b.ai||{}, r=b.parse||{}, sp='<span class="spin"></spa
   if(r.status==='running') return `<span class="aist" title="Docling 在背景解析版面：分段、圖片、表格">${sp}版面解析中${r.total?` ${Math.min(r.next||0,r.total)}/${r.total} 頁`:''}</span>`;
   if(r.status==='queued') return `<span class="aist">${sp}${CAPS.docling&&CAPS.docling.status==='installing'?'等 Docling 安裝好':'等待版面解析'}</span>`;
   if(a.status==='running'||a.status==='queued') return `<span class="aist">${sp}AI 判斷書名、分類中</span>`;
-  const pf=b.proof||{}; if(pf.status==='running'||pf.status==='queued') return `<span class="aist" title="${pf.phase==='best'?'Sonnet 每 3 頁抽查一頁，有問題再看前後各 2 頁':'Haiku 每一頁對照原書，修正漏字和錯字'}">${sp}${pf.phase==='best'?'AI 抽查中':'AI 校對中'} ${pf.done||0}/${pf.total||0} 頁</span>`;
+  const pf=b.proof||{}; if(pf.status==='running'||pf.status==='queued') return `<span class="aist" title="${pf.phase==='best'?'Sonnet 每 3 頁抽查一頁，有問題再看前後各 2 頁':pf.phase==='read'?'抽不出文字的頁：AI 直接看頁面圖讀出內文':'Haiku 每一頁對照原書，修正漏字和錯字'}">${sp}${pf.phase==='best'?'AI 抽查中':pf.phase==='read'?'AI 讀取頁面中':'AI 校對中'} ${pf.done||0}/${pf.total||0} 頁</span>`;
   if(pf.status==='error') return `<span class="aist bad" title="${esc(pf.error||'')}">AI 校對中斷</span>`;
   const fx=b.fix||{}; if(fx.status==='running') return `<span class="aist" title="掃描書：AI 正在修正辨識錯字比較多的頁">${sp}AI 修正錯字中 ${fx.done||0}/${fx.total||0} 頁</span>`;
   if(r.status==='error') return `<span class="aist bad" title="${esc(r.error||'')}">版面解析失敗</span>`;

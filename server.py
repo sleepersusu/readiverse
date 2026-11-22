@@ -570,6 +570,42 @@ def quality_job(bid):
 
 # ---------- AI 校對：Claude 看原書每一頁的圖，逐字對照解析出來的文字，只回報差異；程式照著改（AI 不會整段重寫）----------
 PROOFQ = queue.Queue()
+READ_PROMPT = ("Read the image file %s. It is one page of a printed book. Our text extraction got NOTHING from this page "
+    "(it may be a scanned image or a PDF we could not parse).\n"
+    "Transcribe the body text of this page exactly as printed, word for word, in reading order. Rules:\n"
+    "- One string per paragraph. Join lines inside a paragraph with spaces; join words hyphenated at a line end.\n"
+    "- Headings (chapter titles, section titles, 'Part 1', 'Chapter IV') are their own strings.\n"
+    "- Leave out the running header, the page number, and text that is part of a picture, chart or table.\n"
+    "- Keep the original punctuation (em dashes, curly quotes). Footnote reference numbers as superscript digits (like ¹⁹).\n"
+    "- Never add, summarize or correct anything. If the page has no body text (blank, picture only), return an empty list.\n"
+    "Reply with ONLY JSON: {\"paras\": [\"...\", \"...\"]}")
+
+
+def read_page_ai(bid, pno, imgdir, kind='fast'):
+    """解析不出文字的頁：讓 AI 直接看頁面圖，把內文一段一段讀出來（掃描書、壞掉的 PDF 都可以）"""
+    d = os.path.join(LIB, bid)
+    img = os.path.join(imgdir, 'p%d.jpg' % (pno + 1))
+    if not os.path.exists(img): return {'ok': False, 'error': '沒有頁面圖'}
+    c = claude_path()
+    if not c: raise RuntimeError('找不到 Claude Code')
+    r = subprocess.run([*claude_argv(c), '-p', '--model', ai_model(kind), '--allowedTools', 'Read', '--add-dir', imgdir, '--', READ_PROMPT % img],
+                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
+    m = re.search(r'\{[\s\S]*\}', r.stdout or '')
+    if r.returncode != 0 or not m:
+        err = ((r.stderr or r.stdout or '').strip().splitlines() or ['沒有回應'])[-1][:200]
+        if re.search(r'auth|login|expired', err, re.I): raise RuntimeError('Claude 沒有登入：' + err)
+        return {'ok': False, 'error': err}
+    try: paras = [str(x).strip() for x in (json.loads(m.group(0)).get('paras') or []) if str(x).strip()]
+    except (ValueError, AttributeError): return {'ok': False, 'error': 'AI 回傳的格式不對'}
+    with LOCK:
+        pages = read_json(os.path.join(d, 'pages.json')) or []
+        frozen = used_pages(read_json(os.path.join(d, 'state.json'), {}))
+        if pno < len(pages) and pno not in frozen and not any(is_text(x) for x in pages[pno]) and paras:
+            pages[pno] = paras + [x for x in pages[pno] if not is_text(x)]      # 圖表留著，放在文字後面
+            write_json(os.path.join(d, 'pages.json'), pages)
+    return {'ok': True, 'read': len(paras), 't': int(time.time())}
+
+
 PROOF_PROMPT = ("Read the image file %s. It is one page of a printed book.\n"
     "Below is the text we extracted. \"prev_tail\" is the end of the previous page's last paragraph (this page may start in the middle of it). "
     "\"paras\" are the text paragraphs on this page, keyed by paragraph index (figures and tables are handled separately; ignore their contents).\n"
@@ -717,13 +753,33 @@ def proof_job(bid):
     d = os.path.join(LIB, bid)
     with LOCK:
         pages = read_json(os.path.join(d, 'pages.json')) or []
+    stop = [None]
+    # 第 0 輪：解析不出文字的頁（沒有任何文字、也不是只有圖表的頁）→ AI 直接看頁面圖讀出來
+    rd = read_json(os.path.join(d, 'read_ai.json'), {}) or {}
+    empty = [i for i, pg in enumerate(pages) if not any(is_text(x) for x in pg) and not any(isinstance(x, dict) for x in pg) and not (rd.get(str(i + 1)) or {}).get('t')]
+    if empty:
+        update_book(bid, proof={'status': 'running', 'phase': 'read', 'done': 0, 'total': len(empty)})
+        imgdir = render_pages(bid, [i + 1 for i in empty])
+        def rone(i):
+            if stop[0]: return
+            try: r = read_page_ai(bid, i, imgdir)
+            except RuntimeError as e: stop[0] = str(e); return
+            with LOCK:
+                fn = os.path.join(d, 'read_ai.json'); rr = read_json(fn, {}) or {}; rr[str(i + 1)] = r; write_json(fn, rr)
+                b = find_book(load_index(), bid); pr = dict((b or {}).get('proof') or {}); pr['done'] = pr.get('done', 0) + 1
+                pr['rev'] = int(time.time() * 1000); update_book(bid, proof=pr)
+        with ThreadPoolExecutor(max_workers=3) as ex: list(ex.map(rone, empty))
+        if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
+        with LOCK:
+            pages = read_json(os.path.join(d, 'pages.json')) or []
+            ix = load_index(); bb = find_book(ix, bid)
+        if bb and not bb.get('hasText') and any(any(is_text(x) for x in pg) for pg in pages): update_book(bid, hasText=True)
     textp = [i for i, pg in enumerate(pages) if any(is_text(x) for x in pg)]
     if not textp: update_book(bid, proof={'status': 'done', 'done': 0, 'total': 0, 'fixed': 0}); return
     TP = set(textp)
     recs = lambda kind: read_json(os.path.join(d, PROOF_FILES[kind]), {}) or {}
     checked = lambda kind: {int(k) - 1 for k, v in recs(kind).items() if str(k).isdigit() and (v or {}).get('t')}
     def issues(v): return bool([a for a in (v or {}).get('applied') or [] if not a.get('already')] or (v or {}).get('failed'))
-    stop = [None]
     def run_round(todo, kind, workers):
         imgdir = render_pages(bid, [i + 1 for i in todo])
         def one(i):
@@ -751,6 +807,7 @@ def proof_job(bid):
     with LOCK: pages = read_json(os.path.join(d, 'pages.json')) or []
     flagged = {int(k) - 1 for k in lost if str(k).isdigit()} | set(bad_pages(pages))
     flagged |= {int(k) - 1 for k, v in recs('fast').items() if str(k).isdigit() and (v or {}).get('failed')}
+    flagged |= {int(k) - 1 for k, v in (read_json(os.path.join(d, 'read_ai.json'), {}) or {}).items() if str(k).isdigit() and (v or {}).get('read')}
     seeds = set(textp[::PROOF_EVERY]) | (flagged & TP); plan = set(seeds)
     while True:
         done_set = checked('best')
@@ -922,7 +979,8 @@ def parse_job(bid):
     finally:
         PARSE_PROC.pop(bid, None)
     if p.returncode not in (0, None) and not got:
-        update_book(bid, parse={'status': 'error', 'error': 'Docling 解析失敗（代碼 %s）' % p.returncode}); return
+        update_book(bid, parse={'status': 'error', 'error': 'Docling 解析失敗（代碼 %s）' % p.returncode})
+        queue_proof(bid); return                                                       # 解析失敗：AI 直接看頁面圖讀
     with LOCK:
         pages = read_json(os.path.join(d, 'pages.json')) or []
         write_json(os.path.join(d, 'lost.json'), lost)
@@ -930,17 +988,26 @@ def parse_job(bid):
                         hasText=sum(len(page_text(pg)) for pg in pages) > 40)
     if b and claude_path() and (read_json(CONFIG, {}) or {}).get('proof', True):
         with LOCK:                                                      # 重新解析過：整本重新校對（兩輪都重來）
-            for fn in PROOF_FILES.values(): write_json(os.path.join(d, fn), {})
+            for fn in list(PROOF_FILES.values()) + ['read_ai.json']: write_json(os.path.join(d, fn), {})
         update_book(bid, proof={'status': 'queued', 'done': 0, 'total': total})  # 記下來：App 關掉再開也會接著校對
         PROOFQ.put(bid)                                                 # AI 逐頁對照原書校對
     elif b and b.get('scanned'): QQ.put(bid)                            # 沒有 Claude：至少檢查亂碼頁
+
+
+def queue_proof(bid):
+    """排進 AI 校對（沒文字的頁 AI 直接讀 → Haiku 逐頁 → Sonnet 抽查）。有 Claude 而且設定沒關掉才排"""
+    if not claude_path() or not (read_json(CONFIG, {}) or {}).get('proof', True): return False
+    b = find_book(load_index(), bid)
+    if not b or (b.get('proof') or {}).get('status') in ('running', 'queued'): return False
+    update_book(bid, proof={'status': 'queued', 'done': 0, 'total': b.get('pages') or 0}); PROOFQ.put(bid); return True
 
 
 def start_parse(bid, restart=False):
     b = find_book(load_index(), bid)
     if not b: return None
     if DOCLING['status'] in ('unavailable', 'error'):
-        return update_book(bid, parse={'status': 'skipped', 'error': DOCLING.get('error') or 'Docling 不能用'})
+        b = update_book(bid, parse={'status': 'skipped', 'error': DOCLING.get('error') or 'Docling 不能用'})
+        queue_proof(bid); return find_book(load_index(), bid) or b                  # 解析不了：AI 直接看頁面圖
     nxt = 0 if restart else int((b.get('parse') or {}).get('next') or 0)
     b = update_book(bid, parse={'status': 'queued', 'next': nxt, 'total': b.get('pages') or 0})
     PARSEQ.put(bid); return b
@@ -1257,7 +1324,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, b)
             if sub == 'proof' and m == 'POST':       # 重新校對整本
                 if self.body_json().get('restart'):
-                    for fn in PROOF_FILES.values(): write_json(os.path.join(d, fn), {})
+                    for fn in list(PROOF_FILES.values()) + ['read_ai.json']: write_json(os.path.join(d, fn), {})
                 b = update_book(bid, proof={'status': 'queued', 'done': 0, 'total': b.get('pages') or 0}); PROOFQ.put(bid)
                 return self.send(200, b)
             if sub == 'ai-page' and m == 'POST':     # 用 AI 整理某一頁
@@ -1349,9 +1416,28 @@ def upd_can():
     return True
 
 
+def _ssl_ctx():
+    """HTTPS 憑證：打包版的 Python 不一定找得到系統的憑證，有 certifi 就用它"""
+    import ssl
+    try:
+        import certifi; return ssl.create_default_context(cafile=certifi.where())
+    except Exception: return ssl.create_default_context()
+
+
+def _open(url, timeout=30, accept=None):
+    req = urllib.request.Request(url, headers={'User-Agent': 'readiverse', **({'Accept': accept} if accept else {})})
+    return urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx())
+
+
 def _gh(url):
-    req = urllib.request.Request(url, headers={'User-Agent': 'readiverse', 'Accept': 'application/vnd.github+json'})
-    with urllib.request.urlopen(req, timeout=10) as r: return json.loads(r.read())
+    try:
+        with _open(url, 10, 'application/vnd.github+json') as r: return json.loads(r.read())
+    except Exception as e:
+        try:                                          # Python 連不上（例如憑證）：改用系統內建的 curl
+            out = subprocess.run(['curl', '-sfL', '--max-time', '15', '-H', 'User-Agent: readiverse', url], capture_output=True, timeout=20).stdout
+            if out: return json.loads(out.decode('utf-8'))
+        except Exception: pass
+        raise e
 
 
 def upd_check(force=False):
@@ -1374,8 +1460,9 @@ def upd_check(force=False):
             if tv and (cur is None or tv > cur):
                 notes += [l[2:].strip() for l in str(rr.get('body') or '').splitlines() if l.startswith('- ')]
         s['notes'] = list(dict.fromkeys(n for n in notes if n))[:60]
+        s['checkError'] = ''
     except Exception as e:
-        print('檢查更新失敗：', e)
+        print('檢查更新失敗：', e); s['checkError'] = '連不上 GitHub：%s' % str(e)[:160]
 
 
 def upd_info():
@@ -1383,6 +1470,7 @@ def upd_info():
     avail = bool(s['asset'] and lat and cur and lat > cur)
     return {'can': upd_can(), 'current': VERSION, 'latest': s['latest'], 'available': avail, 'stage': s['stage'],
             'pct': int(s['got'] * 100 / s['total']) if s['total'] else 0, 'error': s['error'], 'notes': s['notes'],
+            'checkError': s.get('checkError', ''),
             'repo': UPD_REPO}
 
 
@@ -1414,8 +1502,7 @@ def upd_run():
         for attempt in range(3):                       # 網路斷掉就重新下載（最多 3 次），沒下載完整絕不安裝
             s.update(stage='download', got=0, total=s['size'] or 0, error='', ts=time.time())
             try:
-                req = urllib.request.Request(s['asset'], headers={'User-Agent': 'readiverse'})
-                with urllib.request.urlopen(req, timeout=30) as r, open(z, 'wb') as f:
+                with _open(s['asset'], 30) as r, open(z, 'wb') as f:
                     s['total'] = int(r.headers.get('Content-Length') or s['total'] or 0)
                     while True:
                         b = r.read(1 << 16)

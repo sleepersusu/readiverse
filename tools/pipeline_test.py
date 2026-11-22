@@ -12,6 +12,9 @@ sys.path.insert(0, HERE)
 import server as S                       # clean_pages、garble 跟 App 用的是同一份
 
 
+LOST = []
+
+
 def run_worker(pdf, rng):
     """跟 App 一樣：呼叫 docling_worker.py，收每一批的結果"""
     figdir = tempfile.mkdtemp(prefix='rv_figs_')
@@ -24,6 +27,7 @@ def run_worker(pdf, rng):
         except ValueError: continue
         if 'total' in j: total = j['total']; info = j; b = min(b, total)
         if 'pages' in j: pages.update(j['pages'])
+        if 'lost' in j: LOST.append((j['lost'], j.get('words')))
         if j.get('to', 0) >= b: break
     p.kill()                              # 要的頁數拿到就停（不用整本跑完）
     return total, info, pages
@@ -71,7 +75,8 @@ def main():
         b = min(b, total)
         pages = [raw.get(str(n), []) for n in range(a, b + 1)]
         pages = S.clean_pages(pages)
-        probs = check(pages, a)
+        probs = check(pages, a) + [(n, '辨識到的字沒出現在段落裡（漏字）', ' '.join(w)) for n, w in LOST if a <= n <= b]
+        LOST.clear()
         heads = [(a + i, x) for i, pg in enumerate(pages) for k, x in enumerate(pg)
                  if S.is_text(x) and k == 0 and len(x) <= 60 and not re.search(r'[.!?,;:]$', x)]
         print('\n==== %s  (%s, 第 %d-%d 頁, %.0f 秒)' % (os.path.basename(pdf), '掃描書・' + (info.get('ocr') or 'PDF 文字') if info.get('scanned') else '數位書・Docling', a, b, time.time() - t))

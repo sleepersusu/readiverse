@@ -55,9 +55,9 @@ PDF 是用 [pdf.js](https://mozilla.github.io/pdf.js/) 讀的，第一次打開�
 
 ## AI 翻譯／整理
 
-AI 用的是你電腦上已經登入的 **Claude Code**（`claude`）。Claude 不能用時，會自動改用 **Codex**（`codex`）。兩個都沒有的話，閱讀和筆記照樣能用，只是沒有翻譯和自動整理。
+AI 只用你電腦上已經登入的 **Claude Code**（`claude`）。沒有登入的話，閱讀、筆記、解析照樣能用，只是沒有翻譯、書名判斷和 AI 校對。
 
-- Claude 登入過期：在終端機輸入 `claude` 重新登入。
+- Claude 登入過期：在終端機輸入 `claude`，再輸入 `/login` 重新登入。
 
 ## 資料放在哪裡
 

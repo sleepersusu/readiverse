@@ -29,6 +29,11 @@ def has_ocrmac():
     except Exception: return False
 
 
+import re as _re
+# Apple Vision 常把破折號「—」讀成「-」：一般單字後面接虛詞（football-that、hockey-and）→ 改回「—」；face-to-face 這種一串的不動
+DASH = _re.compile(r"(?<![\w-])([A-Za-z]{3,})-(that|and|the|but|or|which|who|whom|not|even|if|so|yet|then|when|while|as|because|though|although|just|perhaps|maybe|in|on|at|for|with|from|to|of|a|an|it|he|she|they|we|i|you|this|these|those|one|all|no|nothing|something|everything|what|where|how|why|my|his|her|their|our|its|was|is|are|were|had|has|have|would|could|should|will|can|did|do|does)\b(?!-)", _re.I)
+
+
 def vision_page(pg):
     """掃描書的一頁：Apple Vision 辨識每一行（位置、大小），照排版自己分段（Docling 會把 OCR 的行順序弄亂）
     - 頁首（書名、章名）：第一行、短、置中、底下空隙小 → 丟掉
@@ -39,8 +44,19 @@ def vision_page(pg):
     import re
     from ocrmac import ocrmac
     img = pg.render(scale=2.5).to_pil()
-    L = [(t.strip(), x, y, w, h) for t, c, (x, y, w, h) in ocrmac.OCR(img, recognition_level='accurate', language_preference=['en-US']).recognize() if t.strip()]
-    if not L: return []
+    raw = [(t.strip(), x, y, w, h) for t, c, (x, y, w, h) in ocrmac.OCR(img, recognition_level='accurate', language_preference=['en-US']).recognize() if t.strip()]
+    if not raw: return []
+    # 同一行被切成好幾段（「said.」和「"You and I…」）：垂直位置重疊的併成一行，由左到右接起來
+    raw.sort(key=lambda r: -(r[2] + r[4]))
+    L = []
+    for t, x, y, w, h in raw:
+        for k, (t2, x2, y2, w2, h2) in enumerate(L):
+            ov = min(y + h, y2 + h2) - max(y, y2)
+            if ov > 0.5 * min(h, h2):
+                segs = sorted([(x2, t2, w2), (x, t, w)])
+                nx, nw = min(x, x2), max(x + w, x2 + w2) - min(x, x2)
+                L[k] = (' '.join(sg[1] for sg in segs), nx, min(y, y2), nw, max(y + h, y2 + h2) - min(y, y2)); break
+        else: L.append((t, x, y, w, h))
     L.sort(key=lambda r: -(r[2] + r[4]))                        # 由上往下
     hs = sorted(r[4] for r in L); medh = hs[len(hs) // 2]
     xs = sorted(r[1] for r in L); left = xs[max(0, len(xs) // 10)]
@@ -55,7 +71,7 @@ def vision_page(pg):
         centered = abs(cx - 0.5) < 0.08
         if short and h > medh * 1.3: heads.add(0)                                           # 章名：字比內文大
         elif short and centered and y + h > 0.8: L = L[1:]                                    # 頁首（書名、章名，字不大、在最上面）
-    out, cur, prev = [], None, None
+    out, cur, prev, junk = [], None, None, []
     for k, (t, x, y, w, h) in enumerate(L):
         head = k in heads or (h > medh * 1.3 and w < maxw * 0.75 and len(t.split()) <= 10 and not re.search(r'[.!?,;]$', t))
         new = (prev is None or head or prev['head'] or x > left + 0.025
@@ -64,14 +80,34 @@ def vision_page(pg):
         if new:
             if cur is not None: out.append(cur)
             if prev is not None and prev['head'] and not head:
-                t = re.sub(r'^[a-z]{1,4}\s+(?=[A-Z])', '', t)       # 花紋、首字放大被辨識成的亂碼
+                m = re.match(r'^([a-z]{1,4})\s+(?=[A-Z])', t)          # 花紋、首字放大被辨識成的亂碼
+                if m: junk.append(m.group(1)); t = t[m.end():]
             t = re.sub(r'^([A-Z])\s+(?=\1[a-z])', '', t)            # 「A As my old professor」
             cur = t
         elif re.search(r'[A-Za-z]-$', cur) and re.match(r'[a-z]', t): cur = cur[:-1] + t
         else: cur = cur + ' ' + t
         prev = {'t': t, 'y': y, 'w': w, 'head': head}
     if cur is not None: out.append(cur)
+    out = [DASH.sub(lambda m: m.group(1) + '—' + m.group(2), x) for x in out]
+    # 小節開頭的花紋被認成的字（「an As I turned」「men I look back」）：之後的清理步驟會拿掉，漏字檢查不算
+    junk += [m.group(1) for x in out for m in [re.match(r'^([a-z]{1,4})\s+(?=[A-Z][a-z])', x)] if m]
+    vision_page.lost = [w for w in _lost_words(L, out) if w not in junk]
     return out
+
+
+def _lost_words(lines, paras):
+    """漏字檢查：辨識到的每個字（頁首、頁碼、花紋除外）都要出現在段落裡"""
+    import re
+    from collections import Counter
+    norm = lambda s: [w for w in re.findall(r"[a-z0-9']+", s.lower().replace('’', "'")) if len(w) > 1]
+    have = Counter(norm(' '.join(paras)).__iter__())
+    for p in paras:                                   # 斷字接起來的字也算
+        for a, b in re.findall(r'(\w+)-(\w+)', p): have[(a + b).lower()] += 1
+    joined = ''                                       # 原始的行照樣把行尾斷字接起來（peo- / ple → people）再比
+    for t, *_ in lines:
+        joined = joined[:-1] + t if re.search(r'[A-Za-z]-$', joined) and re.match(r'[a-z]', t) else (joined + ' ' + t)
+    need = Counter(norm(joined))
+    return sorted(w for w, n in need.items() if have.get(w, 0) + sum(1 for h in have if w in h and len(w) > 3) < 1)
 
 
 def main():
@@ -90,7 +126,9 @@ def main():
         for a in range(start, total + 1, chunk):
             b = min(total, a + chunk - 1); pages = {}
             for n in range(a, b + 1):
-                try: pages[str(n)] = vision_page(pd[n - 1])
+                try:
+                    pages[str(n)] = vision_page(pd[n - 1])
+                    if getattr(vision_page, 'lost', None): print(json.dumps({'lost': n, 'words': vision_page.lost[:20]}), flush=True)
                 except Exception as e: print(json.dumps({'warn': 'page %d: %s' % (n, e)}), flush=True)
             print(json.dumps({'from': a, 'to': b, 'pages': pages}, ensure_ascii=False), flush=True)
         return

@@ -21,7 +21,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
 def _fix_path():
-    """雙擊 App 打開時，macOS 只給很短的 PATH（找不到 claude、codex、node、uv）：補上使用者登入時的 PATH"""
+    """雙擊 App 打開時，macOS 只給很短的 PATH（找不到 claude、node、uv）：補上使用者登入時的 PATH"""
     if sys.platform.startswith('win'): return
     extra = []
     try:
@@ -171,25 +171,21 @@ def clean_meta(d):
     return out
 
 
-# ---------- AI：用電腦上已登入的 Claude Code，不能用就換 Codex（ChatGPT）----------
+# ---------- AI：只用電腦上已登入的 Claude Code ----------
 AI_BAD = {}       # 剛剛失敗的工具：10 分鐘內先跳過，省時間
 
 
-def ai_cmds(prompt):
-    out = []
+def ai_cmds(prompt, model=None):
+    """只用 Claude（電腦上登入的 Claude Code）"""
     claude = shutil.which('claude') or os.path.expanduser('~/.local/bin/claude')
-    if os.path.exists(claude):
-        out.append(('Claude Code', [claude, '-p', '--model', os.environ.get('READIVERSE_MODEL', 'claude-haiku-5-5'), prompt]))
-    codex = shutil.which('codex')
-    if codex: out.append(('Codex', [codex, 'exec', '--skip-git-repo-check', prompt]))
-    good = [c for c in out if time.time() - AI_BAD.get(c[0], 0) > 600]
-    return good + [c for c in out if c not in good]
+    if not os.path.exists(claude): return []
+    return [('Claude Code', [claude, '-p', '--model', model or os.environ.get('READIVERSE_MODEL', 'claude-haiku-5-5'), prompt])]
 
 
 def ai_json(prompt, want=list, timeout=300):
     """問 AI，回傳 JSON（list 或 dict）。全部工具都失敗就丟 RuntimeError"""
     cmds = ai_cmds(prompt)
-    if not cmds: raise RuntimeError('找不到 AI 工具：請先安裝並登入 Claude Code（終端機輸入 claude）或 Codex')
+    if not cmds: raise RuntimeError('找不到 Claude Code：請先安裝並登入（終端機輸入 claude）')
     errs = []
     for name, cmd in cmds:
         try:

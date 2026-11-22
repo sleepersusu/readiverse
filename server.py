@@ -878,12 +878,13 @@ def proof_job(bid):
     # 第 2 輪：Sonnet 抽查（這本書設定成只做第 1 輪就跳過；之後可以再單獨補做）
     tops = [int(x) for x in ((find_book(load_index(), bid) or {}).get('proofTopPages') or []) if str(x).isdigit()]
     if tops:                                    # 指定交給 Opus 的頁（Sonnet 修不了的）：這一頁和前後各 5 頁
-        tplan = {j for n in tops for j in range(n - 1 - PROOF_TOP_NEAR, n + PROOF_TOP_NEAR) if j in TP}
+        near = int((find_book(load_index(), bid) or {}).get('proofTopNear', PROOF_TOP_NEAR))     # 0 = 只看指定的那幾頁
+        tplan = {j for n in tops for j in range(n - 1 - near, n + near) if j in TP}
         todo = sorted(tplan - checked('top'))
         update_book(bid, proof={'status': 'running', 'phase': 'top', 'done': len(tplan) - len(todo), 'total': len(tplan)})
         if todo: run_round(todo, 'top', 1)
         if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
-        update_book(bid, proofTopPages=[])
+        update_book(bid, proofTopPages=[], proofTopNear=PROOF_TOP_NEAR)
     if (find_book(load_index(), bid) or {}).get('proofFastOnly'):
         if (find_book(load_index(), bid) or {}).get('proofFigs'):     # 補做：只用 Sonnet 看有圖片、表格的頁和前後各一頁
             with LOCK: pages = read_json(os.path.join(d, 'pages.json')) or []

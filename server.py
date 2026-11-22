@@ -521,12 +521,12 @@ def quality_job(bid):
 PROOFQ = queue.Queue()
 PROOF_PROMPT = ("Read the image file %s. It is one page of a printed book.\n"
     "Below is the text we extracted. \"prev_tail\" is the end of the previous page's last paragraph (this page may start in the middle of it). "
-    "\"paras\" are the text paragraphs on this page (figures and tables are handled separately; ignore their contents).\n"
+    "\"paras\" are the text paragraphs on this page, keyed by paragraph index (figures and tables are handled separately; ignore their contents).\n"
     "Proofread word by word against the image, IN READING ORDER. Report ONLY real differences in the body text: missing words or sentences, misread words, "
     "words or sentences in the wrong place or order (for example a word that belongs at the end of prev_tail but was put at the start of paragraph 0 — "
     "fix it by inserting it in the right place and replacing the misplaced copy with an empty string), "
     "wrong punctuation (em dashes, quotes, apostrophes). Footnote reference numbers should be superscript digits (like ¹⁹) right after the word or punctuation.\n"
-    "Ignore the running header and page number, line-end hyphenation, indentation and paragraph spacing.\n"
+    "Ignore the running header and page number, line-end hyphenation, indentation and paragraph spacing. The LAST paragraph may continue past the bottom of this page (we join paragraphs that run onto the next page): text after the last line shown is NOT an error, never delete it.\n"
     "Reply with ONLY JSON:\n"
     "{\"fixes\":[{\"where\":\"prev_tail\" or a paragraph index,\"find\":\"exact short substring as given\",\"replace\":\"what the page says\"}],\n"
     " \"inserts\":[{\"where\":\"prev_tail\" or a paragraph index,\"after\":\"exact short substring as given\",\"insert\":\"missing text exactly as printed\"}],\n"
@@ -545,6 +545,60 @@ def render_pages(bid, nums):
     return out
 
 
+def apply_proof(pages, pno, j, frozen):
+    """把 AI 的修正套進 pages（原地改）。AI 給的段落編號不一定準：
+    先找它說的那段，找不到就在這頁（和上一頁最後一段）找唯一出現的地方。回傳 (applied, failed)"""
+    applied, failed = [], []
+    def spots():
+        out = []
+        if pno > 0 and (pno - 1) not in frozen:
+            idx = max([i for i, x in enumerate(pages[pno - 1]) if is_text(x)] or [-1])
+            if idx >= 0: out.append((pno - 1, idx))
+        if pno not in frozen: out += [(pno, i) for i, x in enumerate(pages[pno]) if is_text(x)]
+        return out
+    def target(where, needle):
+        S = spots(); first = None
+        if where == 'prev_tail': first = S[0] if S and S[0][0] == pno - 1 else None
+        else:
+            try:
+                k = int(where); T = [x for x in S if x[0] == pno]
+                first = T[k] if 0 <= k < len(T) else None
+            except (TypeError, ValueError): pass
+        if first and pages[first[0]][first[1]].count(needle) == 1: return first
+        hit = [x for x in S if needle in pages[x[0]][x[1]]]                 # 編號不對：整頁找
+        return hit[0] if len(hit) == 1 and pages[hit[0][0]][hit[0][1]].count(needle) == 1 else None
+    for f in j.get('fixes') or []:
+        find, rep_ = str(f.get('find') or ''), str(f.get('replace') or '')
+        if not find or len(rep_) > len(find) + 300: failed.append(f); continue
+        t = target(f.get('where'), find)
+        if not t:
+            if rep_ and len(rep_) > 2 and any(rep_ in pages[x[0]][x[1]] for x in spots()): applied.append(dict(f, already=True))   # 已經改好了
+            else: failed.append(f)
+            continue
+        if not rep_ and len(find.strip()) > 60:                             # 刪一大段：只准刪「隔壁頁也有一模一樣」的重複
+            core = find.strip(); nb = [x for x in spots() if x != t] + [(pno + 1, i) for i, x in enumerate(pages[pno + 1] if pno + 1 < len(pages) else []) if is_text(x)]
+            if not any(core in pages[x[0]][x[1]] for x in nb): failed.append(f); continue
+        pages[t[0]][t[1]] = pages[t[0]][t[1]].replace(find, rep_); applied.append(f)
+    for f in j.get('inserts') or []:
+        after, ins = str(f.get('after') or ''), str(f.get('insert') or '').strip()
+        if not after or not ins or len(ins) > 1500: failed.append(f); continue
+        t = target(f.get('where'), after)
+        if not t or ins in pages[t[0]][t[1]]:
+            if t or any(ins in pages[x[0]][x[1]] for x in spots()): applied.append(dict(f, already=True))
+            else: failed.append(f)
+            continue
+        txt = pages[t[0]][t[1]]; k = txt.index(after) + len(after)
+        left, right = txt[:k].rstrip(' '), txt[k:].lstrip(' ')
+        pre = '' if ins[:1] in '.,;:!?)]”’' else ' '                          # 插入的字前後補空格（標點不補）
+        post = '' if not right or right[:1] in '.,;:!?)]”’' else ' '
+        pages[t[0]][t[1]] = left + pre + ins + post + right
+        applied.append(f)
+    if applied:
+        for q in {pno - 1, pno}:                                           # 被清空的段落拿掉
+            if 0 <= q < len(pages): pages[q] = [x for x in pages[q] if not is_text(x) or x.strip()]
+    return applied, failed
+
+
 def proof_page(bid, pno, imgdir):
     """校對一頁（pno 從 0 開始）。回傳這頁的紀錄"""
     d = os.path.join(LIB, bid)
@@ -556,7 +610,7 @@ def proof_page(bid, pno, imgdir):
     prev = next((x for x in reversed(pages[pno - 1]) if is_text(x)), '') if pno > 0 else ''
     img = os.path.join(imgdir, 'p%d.jpg' % (pno + 1))
     if not os.path.exists(img): return {'ok': False, 'error': '沒有頁面圖'}
-    payload = json.dumps({'prev_tail': prev[-200:], 'paras': paras}, ensure_ascii=False)
+    payload = json.dumps({'prev_tail': prev[-200:], 'paras': {str(i): t for i, t in enumerate(paras)}}, ensure_ascii=False)
     c = claude_path()
     if not c: raise RuntimeError('找不到 Claude Code')
     r = subprocess.run([c, '-p', '--model', ai_model('best'), '--allowedTools', 'Read', '--add-dir', imgdir, '--', PROOF_PROMPT % (img, payload)],
@@ -568,42 +622,11 @@ def proof_page(bid, pno, imgdir):
         return {'ok': False, 'error': err}
     try: j = json.loads(m.group(0))
     except ValueError: return {'ok': False, 'error': 'AI 回傳的格式不對'}
-    applied, failed = [], []
     with LOCK:
         pages = read_json(os.path.join(d, 'pages.json')) or []
         frozen = used_pages(read_json(os.path.join(d, 'state.json'), {}))
-        def target(where):
-            if where == 'prev_tail':
-                if pno == 0 or (pno - 1) in frozen: return None
-                pg = pages[pno - 1]; idx = max([i for i, x in enumerate(pg) if is_text(x)] or [-1])
-                return (pno - 1, idx) if idx >= 0 else None
-            if pno in frozen: return None
-            try: k = int(where)
-            except (TypeError, ValueError): return None
-            T = [i for i, x in enumerate(pages[pno]) if is_text(x)]
-            return (pno, T[k]) if 0 <= k < len(T) else None
-        for f in j.get('fixes') or []:
-            t, find, rep_ = target(f.get('where')), str(f.get('find') or ''), str(f.get('replace') or '')
-            if not t or not find or len(rep_) > len(find) + 300: failed.append(f); continue
-            if not rep_ and len(find) > 60: failed.append(f); continue      # 不准一次刪掉一大段
-            txt = pages[t[0]][t[1]]
-            if txt.count(find) != 1: failed.append(f); continue
-            pages[t[0]][t[1]] = txt.replace(find, rep_); applied.append(f)
-        for f in j.get('inserts') or []:
-            t, after, ins = target(f.get('where')), str(f.get('after') or ''), str(f.get('insert') or '').strip()
-            if not t or not after or not ins or len(ins) > 1500: failed.append(f); continue
-            txt = pages[t[0]][t[1]]
-            if txt.count(after) != 1: failed.append(f); continue
-            k = txt.index(after) + len(after)
-            left, right = txt[:k].rstrip(' '), txt[k:].lstrip(' ')
-            pre = '' if ins[:1] in '.,;:!?)]”’' else ' '                          # 插入的字前後補空格（標點不補）
-            post = '' if not right or right[:1] in '.,;:!?)]”’' else ' '
-            pages[t[0]][t[1]] = left + pre + ins + post + right
-            applied.append(f)
-        if applied:
-            for q in {pno - 1, pno}:                       # 被清空的段落拿掉
-                if 0 <= q < len(pages): pages[q] = [x for x in pages[q] if not is_text(x) or x.strip()]
-            write_json(os.path.join(d, 'pages.json'), pages)
+        applied, failed = apply_proof(pages, pno, j, frozen)
+        if applied: write_json(os.path.join(d, 'pages.json'), pages)
     return {'ok': bool(j.get('ok')) and not failed, 'applied': applied, 'failed': failed, 't': int(time.time())}
 
 
@@ -640,7 +663,16 @@ def proof_job(bid):
     with ThreadPoolExecutor(max_workers=2) as ex:
         list(ex.map(one, todo))
     if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300], 'done': done, 'total': total}); return
-    rr = read_json(os.path.join(d, 'proof.json'), {}) or {}
+    with LOCK:                                                              # 之前沒套上的修正再套一次（不用再問 AI）
+        rr = read_json(os.path.join(d, 'proof.json'), {}) or {}
+        pages = read_json(os.path.join(d, 'pages.json')) or []
+        frozen = used_pages(read_json(os.path.join(d, 'state.json'), {})); ch = False
+        for k, v in rr.items():
+            F = (v or {}).get('failed') or []
+            if not F or not k.isdigit() or int(k) - 1 >= len(pages): continue
+            ap, fl = apply_proof(pages, int(k) - 1, {'fixes': [f for f in F if 'find' in f], 'inserts': [f for f in F if 'after' in f]}, frozen)
+            if ap: v['applied'] = (v.get('applied') or []) + ap; v['failed'] = fl; ch = True
+        if ch: write_json(os.path.join(d, 'pages.json'), pages); write_json(os.path.join(d, 'proof.json'), rr)
     fixed = sum(len(v.get('applied') or []) for v in rr.values() if isinstance(v, dict))
     with LOCK:
         pages = read_json(os.path.join(d, 'pages.json')) or []

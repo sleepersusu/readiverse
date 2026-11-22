@@ -15,6 +15,7 @@
 import json, os, re, shutil, subprocess, sys, threading, time, uuid, webbrowser, queue, glob
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
+import rv_dict
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(ROOT, 'static')
@@ -580,6 +581,45 @@ class H(BaseHTTPRequestHandler):
     def api(self, m, p, qs):
         if p == ['library'] and m == 'GET':
             with LOCK: return self.send(200, lib_view(load_index()))
+        # ---------- 字典、單字收藏、句子收藏 ----------
+        if p == ['meaning'] and m == 'GET':
+            return self.send(200, rv_dict.lookup((qs.get('w') or [''])[0]))
+        if p == ['explain'] and m == 'POST':
+            j = self.body_json()
+            try: return self.send(200, rv_dict.explain(str(j.get('w') or '')[:80], str(j.get('ctx') or '')))
+            except RuntimeError as e: return self.err(502, str(e))
+        if p == ['examples'] and m == 'GET':
+            try: return self.send(200, {'ex': rv_dict.ai_examples((qs.get('w') or [''])[0][:80])})
+            except RuntimeError as e: return self.err(502, str(e))
+        if p == ['vocab'] and m == 'GET':
+            return self.send(200, rv_dict.vocab_marks())
+        if p[:1] == ['vocab'] and len(p) == 2 and m == 'POST':
+            j = self.body_json(); act = p[1]
+            if act == 'add':
+                try: return self.send(200, rv_dict.vocab_add(j.get('w', ''), j.get('ctx', ''), j.get('title', ''), j.get('book', ''), j.get('page')))
+                except ValueError as e: return self.err(400, str(e))
+            k = rv_dict.wkey(j.get('k', ''))
+            if act == 'del': rv_dict.vocab_del(k); return self.send(200, {'ok': True})
+            if act == 'review':
+                v = next((x for x in rv_dict.vocab() if x['k'] == k), None)
+                if not v: return self.err(404, '沒有這個字')
+                return self.send(200, rv_dict.vocab_update(k, forgot=(v.get('forgot') or 0) + 1, forgotT=int(time.time() * 1000)))
+            if act == 'note': return self.send(200, rv_dict.vocab_update(k, note=str(j.get('note') or '')[:2000]) or {})
+        if p == ['phrases'] and m == 'GET':
+            return self.send(200, rv_dict.phrases())
+        if p[:1] == ['phrase'] and len(p) == 2 and m == 'POST':
+            j = self.body_json(); act = p[1]
+            if act == 'add':
+                try: return self.send(200, rv_dict.phrase_add(j.get('text', ''), j.get('ctx', ''), j.get('title', ''), j.get('book', ''), j.get('page')))
+                except ValueError as e: return self.err(400, str(e))
+            if act == 'del': rv_dict.phrase_del(j.get('id')); return self.send(200, {'ok': True})
+            if act == 'retry': rv_dict.phrase_retry(j.get('id')); return self.send(200, {'ok': True})
+            if act == 'mark': rv_dict._phr_update(j.get('id'), noMark=bool(j.get('noMark'))); return self.send(200, {'ok': True})
+        if p == ['ielts-import'] and m == 'GET':
+            return self.send(200, rv_dict.ielts_info())
+        if p == ['ielts-import'] and m == 'POST':
+            try: return self.send(200, rv_dict.ielts_import())
+            except ValueError as e: return self.err(404, str(e))
         if p == ['caps'] and m == 'GET':
             return self.send(200, {'docling': DOCLING})
         if p == ['docling'] and m == 'POST':          # 重新試著安裝 Docling
@@ -722,6 +762,7 @@ class H(BaseHTTPRequestHandler):
 def main():
     os.makedirs(LIB, exist_ok=True)
     threading.Thread(target=ai_worker, daemon=True).start()
+    rv_dict.init(lambda: LIB, ai_json)
     threading.Thread(target=parse_worker, daemon=True).start()
     threading.Thread(target=docling_setup, daemon=True).start()
     with LOCK:                                   # 上次沒做完的：接著做

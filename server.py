@@ -175,16 +175,49 @@ def clean_meta(d):
 AI_BAD = {}       # 剛剛失敗的工具：10 分鐘內先跳過，省時間
 
 
+AI_MODELS = [('claude-opus-5-5', 'Opus 5.5', '最強、最準，比較慢、比較花額度'), ('claude-sonnet-5-5', 'Sonnet 5.5', '準、比較快'), ('claude-haiku-5-5', 'Haiku 5.5', '最快、最省額度')]
+AI_DEFAULT = {'best': 'claude-opus-5-5', 'fast': 'claude-haiku-5-5'}       # best：校對、整理頁面；fast：翻譯、書名、解釋
+
+
+def ai_model(kind='fast'):
+    m = ((read_json(CONFIG, {}) or {}).get('aiModels') or {}).get(kind)
+    return m if m in [x[0] for x in AI_MODELS] else AI_DEFAULT[kind]
+
+
+def claude_path():
+    c = shutil.which('claude') or os.path.expanduser('~/.local/bin/claude')
+    return c if os.path.exists(c) else None
+
+
 def ai_cmds(prompt, model=None):
     """只用 Claude（電腦上登入的 Claude Code）"""
-    claude = shutil.which('claude') or os.path.expanduser('~/.local/bin/claude')
-    if not os.path.exists(claude): return []
-    return [('Claude Code', [claude, '-p', '--model', model or os.environ.get('READIVERSE_MODEL', 'claude-haiku-5-5'), prompt])]
+    claude = claude_path()
+    if not claude: return []
+    return [('Claude Code', [claude, '-p', '--model', model or ai_model('fast'), prompt])]
 
 
-def ai_json(prompt, want=list, timeout=300):
+def ai_test():
+    """設定頁的「測試」：叫 Claude 回一個字，看登入、連線、模型能不能用"""
+    c = claude_path()
+    if not c: return {'ok': False, 'error': '這台電腦沒有 Claude Code', 'hint': '先安裝 Claude Code：https://claude.com/claude-code'}
+    out = {}
+    for kind in ('fast', 'best'):
+        m = ai_model(kind); t = time.time()
+        try:
+            r = subprocess.run([c, '-p', '--model', m, 'Reply with exactly: OK'], capture_output=True, text=True, timeout=90, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
+            msg = ((r.stdout or '') + (r.stderr or '')).strip()
+            ok = r.returncode == 0 and 'OK' in (r.stdout or '')
+        except subprocess.TimeoutExpired:
+            ok, msg = False, '超過 90 秒沒有回應'
+        out[kind] = {'ok': ok, 'model': m, 'secs': round(time.time() - t, 1), 'error': '' if ok else msg[-300:]}
+    err = ' '.join(v['error'] for v in out.values())
+    hint = '在終端機輸入 claude，再輸入 /login 重新登入' if re.search(r'auth|login|OAuth|expired|401', err, re.I) else ''
+    return {'ok': all(v['ok'] for v in out.values()), 'path': c, 'tests': out, 'hint': hint}
+
+
+def ai_json(prompt, want=list, timeout=300, kind='fast'):
     """問 AI，回傳 JSON（list 或 dict）。全部工具都失敗就丟 RuntimeError"""
-    cmds = ai_cmds(prompt)
+    cmds = ai_cmds(prompt, ai_model(kind))
     if not cmds: raise RuntimeError('找不到 Claude Code：請先安裝並登入（終端機輸入 claude）')
     errs = []
     for name, cmd in cmds:
@@ -640,7 +673,7 @@ def ai_clean_page(pg):
               'their own paragraphs, remove headers/footers/page numbers/noise. Fix obvious OCR errors (e.g. "Ta king" -> "Taking"), but do '
               'NOT translate, summarize or reword anything else. Reply with ONLY a JSON object with the same keys.\n\n%s'
               % json.dumps(chunk, ensure_ascii=False))
-    res = ai_json(prompt, dict, 300)
+    res = ai_json(prompt, dict, 420, kind='best')
     out = []
     for i, s in enumerate(segs):
         if not isinstance(s, list): out.append(s); continue
@@ -750,7 +783,14 @@ class H(BaseHTTPRequestHandler):
             try: return self.send(200, rv_dict.ielts_import())
             except ValueError as e: return self.err(404, str(e))
         if p == ['caps'] and m == 'GET':
-            return self.send(200, {'docling': DOCLING})
+            return self.send(200, {'docling': DOCLING, 'claude': bool(claude_path()), 'models': AI_MODELS, 'aiModels': {k: ai_model(k) for k in AI_DEFAULT}})
+        if p == ['ai', 'test'] and m == 'POST':
+            return self.send(200, ai_test())
+        if p == ['ai', 'models'] and m == 'PUT':
+            j = self.body_json(); cfg = read_json(CONFIG, {}) or {}
+            cfg['aiModels'] = {k: j[k] for k in AI_DEFAULT if j.get(k) in [x[0] for x in AI_MODELS]}
+            write_json(CONFIG, cfg)
+            return self.send(200, {k: ai_model(k) for k in AI_DEFAULT})
         if p == ['docling'] and m == 'POST':          # 重新試著安裝 Docling
             if DOCLING['status'] not in ('installing', 'ready'): threading.Thread(target=docling_setup, daemon=True).start()
             return self.send(200, {'docling': DOCLING})

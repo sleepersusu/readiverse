@@ -70,8 +70,6 @@ textarea{width:100%;line-height:1.6;border:1px solid var(--line);border-radius:8
 .stat span{font-size:11px;color:var(--muted)}
 .menu .mi{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:0;background:none;padding:6px 6px;min-height:32px;border-radius:6px;font-size:14px}
 .menu .mi:hover{background:var(--soft)}
-.catrow{display:flex;gap:6px;align-items:center;margin-bottom:6px}
-.catrow input{flex:1;min-width:0}
 
 /* ---------- 首頁：大看板＋一排一排的書 ---------- */
 :root{--acc:#c2410c;--gx:clamp(16px,3.5vw,48px)}
@@ -409,6 +407,42 @@ table.vt .fg{font-family:var(--f-mono);font-size:12px;text-align:center}
 .rhead textarea:focus{border-color:var(--pline)!important}
 .rhead textarea::placeholder{color:transparent}
 .rhead:hover textarea::placeholder,.rhead textarea:focus::placeholder{color:var(--pmuted)}
+
+/* ---------- 設定（像 Mac 的系統設定：分區、每一項一列） ---------- */
+dialog.setdlg{width:min(680px,calc(100vw - 32px));max-height:min(86vh,860px);padding:0;border:1px solid var(--line);border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.18);overflow:hidden}
+dialog.setdlg form{display:flex;flex-direction:column;max-height:min(86vh,860px)}
+.shead{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 12px;border-bottom:1px solid var(--line)}
+.shead h2{margin:0;font-size:18px}
+.sbody{overflow:auto;padding:6px 20px 18px;display:flex;flex-direction:column;gap:6px}
+.ssec{padding:14px 0 6px;border-bottom:1px solid var(--line)}
+.ssec:last-child{border-bottom:0}
+.ssec h3{margin:0 0 8px;font-size:12px;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.srow{display:flex;align-items:center;gap:16px;padding:9px 0}
+.srow+.srow{border-top:1px solid var(--soft)}
+.sl{flex:1;min-width:0}
+.st{font-size:14.5px;font-weight:500}
+.sd{font-size:12.5px;color:var(--muted);line-height:1.5}
+.sc{flex:none;display:flex;align-items:center;gap:8px}
+.sc select,.sc input[type=text]{min-width:170px;width:200px}
+.catrow{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.catrow input{flex:1;min-width:0;width:auto}
+.stor{display:flex;flex-direction:column;gap:6px}
+.sopt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;font-size:14px}
+.sopt:has(input:checked){border-color:var(--ink);background:var(--soft)}
+.sopt input{width:auto!important;margin-top:3px;flex:none}
+.sot{min-width:0}
+.sot small{display:block;color:var(--muted);font-size:11.5px;word-break:break-all;margin-top:2px}
+.sfoot{display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid var(--line);background:var(--surface)}
+.aitest{font-size:12.5px;margin-top:4px}
+.aitest.ok{color:var(--ok)} .aitest.bad{color:var(--bad)}
+.sw-toggle{position:relative;display:inline-block;width:42px;height:24px;cursor:pointer}
+.sw-toggle input{opacity:0;width:0;height:0;position:absolute}
+.sw-toggle span{position:absolute;inset:0;border-radius:999px;background:var(--line);transition:background .15s}
+.sw-toggle span::after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .15s}
+.sw-toggle input:checked+span{background:var(--ink)}
+.sw-toggle input:checked+span::after{transform:translateX(18px)}
+.sw-toggle input:focus-visible+span{outline:2px solid var(--ink);outline-offset:2px}
+@media (max-width:560px){.srow{flex-direction:column;align-items:stretch;gap:6px}.sc select,.sc input[type=text]{width:100%}}
 </style></head>
 <body>
 <div class="top">
@@ -623,23 +657,44 @@ $('avBtn').onclick=e=>{ e.stopPropagation(); const m=$('menu'); m.hidden=!m.hidd
 $('menu').onclick=e=>{ if(e.target.closest('[data-m="set"]')){ $('menu').hidden=true; openSettings(); } };
 document.addEventListener('click',e=>{ if(!e.target.closest('#menu,#avBtn')) $('menu').hidden=true; });
 function docHtml(){ const d=CAPS.docling||{};
-  return '版面解析（Docling：分段、圖片、表格）：'+(d.status==='ready'?'✓ 可以用':d.status==='installing'?'<span class="spin"></span>第一次使用，正在安裝（約 2 GB，幾分鐘）':d.status==='checking'?'檢查中…':`<span class="err">${esc(d.error||'不能用')}</span> <button type="button" class="small" data-docretry>重新安裝</button>`); }
+  return (d.status==='ready'?'✓ 可以用':d.status==='installing'?'<span class="spin"></span>第一次使用，正在安裝（約 2 GB，幾分鐘）':d.status==='checking'?'檢查中…':`<span class="err">${esc(d.error||'不能用')}</span> <button type="button" class="small" data-docretry>重新安裝</button>`); }
 document.addEventListener('click',async e=>{ if(e.target.closest('[data-docretry]')){ try{ CAPS=await api.post('/api/docling',{}); }catch(err){} const x=$('sDoc'); if(x) x.innerHTML=docHtml(); } });
 function openSettings(){
-  const d=$('dlg'), th=document.documentElement.getAttribute('data-theme')||'';
-  const catRows=LIB.categories.map(c=>`<div class="catrow"><input type="text" value="${esc(c)}" data-old="${esc(c)}" aria-label="分類名稱"><button type="button" class="ib danger" data-rmcat="${esc(c)}" title="刪除分類" aria-label="刪除分類 ${esc(c)}">×</button></div>`).join('')||'<div class="note">還沒有分類。</div>';
-  d.innerHTML=`<form method="dialog" id="setF"><h2>設定</h2>
-    <div class="fld"><label class="label" for="sName">你的名字</label><input type="text" id="sName" value="${esc((LIB.profile||{}).name||'')}" maxlength="40" placeholder="顯示在首頁"></div>
-    <div class="row" style="gap:10px"><div class="fld grow"><label class="label" for="sTheme">外觀</label><select id="sTheme"><option value="light">淺色</option><option value="dark"${th==='dark'?' selected':''}>深色</option><option value="system"${th==='system'?' selected':''}>跟系統一樣</option></select></div>
-    <div class="fld grow"><label class="label" for="sFs">閱讀字體大小</label><select id="sFs">${[14,15,16,17,18,19,20,22,24,26,28].map(v=>`<option${v===FS?' selected':''}>${v}</option>`).join('')}</select></div></div>
-    <label class="row" style="margin-bottom:10px;font-size:14px;flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="sAi"${LS.get('aiParse',true)?' checked':''} style="margin-top:5px"> 匯入時用 AI 自動填書名、作者、分類、標籤、封面（只問一次；你改過的不會被蓋掉）</label>
-    <div class="note" id="sDoc" style="margin-bottom:14px">${docHtml()}</div>
-    <div class="fld"><span class="label">分類（直接改名字，書會跟著走）</span><div id="sCats">${catRows}</div></div>
-    <div class="fld"><span class="label">書庫存放位置</span><div class="stor" id="sStor"><span class="note"><span class="spin"></span>找雲端硬碟…</span></div>
-      <span class="note">放在 Google 雲端硬碟或 OneDrive，換電腦打開就是同一份書和筆記（要先裝好它們的電腦版）。</span></div>
-    <div class="row" style="justify-content:flex-end"><button type="button" id="sNo">取消</button><button class="primary">儲存</button></div></form>`;
-  d.showModal(); $('sNo').onclick=()=>d.close();
-  api.get('/api/storage').then(L=>{ if(!$('sStor')) return; $('sStor').innerHTML=L.map((o,i)=>`<label><input type="radio" name="stor" value="${i}"${o.current?' checked':''} style="margin-top:4px"><span>${o.kind==='local'?'💻':'☁'} ${esc(o.label)}${o.current?'（目前）':o.hasLibrary?'（那裡已經有書庫，會合併）':''}<small>${esc(o.path)}</small></span></label>`).join('')+(L.length<2?'<span class="note">這台電腦沒找到 Google 雲端硬碟或 OneDrive。</span>':''); $('sStor')._opts=L; }).catch(()=>{});
+  const d=$('dlg'), th=document.documentElement.getAttribute('data-theme')||'light', M=CAPS.models||[], AM=CAPS.aiModels||{};
+  const modelSel=(id,kind)=>`<select id="${id}" aria-label="模型">${M.map(([v,l,n])=>`<option value="${v}"${AM[kind]===v?' selected':''}>${l}</option>`).join('')}</select>`;
+  const catRows=LIB.categories.map(c=>`<div class="catrow"><input type="text" value="${esc(c)}" data-old="${esc(c)}" aria-label="分類名稱"><button type="button" class="ib ghost danger" data-rmcat="${esc(c)}" title="刪除分類" aria-label="刪除分類 ${esc(c)}"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`).join('')||'<div class="note">還沒有分類。</div>';
+  const row=(title,desc,ctl)=>`<div class="srow"><div class="sl"><div class="st">${title}</div>${desc?`<div class="sd">${desc}</div>`:''}</div><div class="sc">${ctl}</div></div>`;
+  d.classList.add('setdlg');
+  d.innerHTML=`<form method="dialog" id="setF">
+    <div class="shead"><h2>設定</h2><button type="button" class="ib ghost" id="sX" aria-label="關閉"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="sbody">
+      <section class="ssec"><h3>個人</h3>
+        ${row('你的名字','顯示在首頁右上角',`<input type="text" id="sName" value="${esc((LIB.profile||{}).name||'')}" maxlength="40" placeholder="名字">`)}
+      </section>
+      <section class="ssec"><h3>閱讀</h3>
+        ${row('外觀','',`<select id="sTheme"><option value="light">淺色</option><option value="dark"${th==='dark'?' selected':''}>深色</option><option value="system"${th==='system'?' selected':''}>跟系統一樣</option></select>`)}
+        ${row('字體大小','閱讀時也可以按 A− A＋',`<select id="sFs">${[14,15,16,17,18,19,20,22,24,26,28].map(v=>`<option${v===FS?' selected':''}>${v}</option>`).join('')}</select>`)}
+      </section>
+      <section class="ssec"><h3>AI（Claude）</h3>
+        <div class="srow"><div class="sl"><div class="st">Claude Code</div><div class="sd" id="aiStat">${CAPS.claude?'已安裝。按「測試」確認登入和連線':'這台電腦沒有 Claude Code'}</div><div id="aiRes"></div></div><div class="sc"><button type="button" id="aiTest">測試</button></div></div>
+        ${row('校對、整理頁面','逐頁對照原書、修正漏字和錯字',modelSel('sMBest','best'))}
+        ${row('翻譯、書名、解釋','中文對照、判斷書名分類、單字解釋',modelSel('sMFast','fast'))}
+      </section>
+      <section class="ssec"><h3>匯入與解析</h3>
+        ${row('匯入時用 AI 填書名資料','書名、作者、分類、標籤、封面；你改過的不會被蓋掉',`<label class="sw-toggle"><input type="checkbox" id="sAi"${LS.get('aiParse',true)?' checked':''}><span></span></label>`)}
+        ${row('版面解析（Docling）','分段、圖片、表格',`<span class="sd" id="sDoc">${docHtml()}</span>`)}
+      </section>
+      <section class="ssec"><h3>分類</h3><div class="sd" style="margin:-4px 0 10px">直接改名字，書會跟著走</div><div id="sCats">${catRows}</div></section>
+      <section class="ssec"><h3>書庫位置</h3><div class="sd" style="margin:-4px 0 10px">放在 Google 雲端硬碟或 OneDrive，換電腦打開就是同一份書和筆記</div>
+        <div class="stor" id="sStor"><span class="note"><span class="spin"></span>找雲端硬碟…</span></div></section>
+    </div>
+    <div class="sfoot"><button type="button" id="sNo">取消</button><button class="primary">儲存</button></div></form>`;
+  d.showModal(); $('sNo').onclick=$('sX').onclick=()=>d.close(); d.addEventListener('close',()=>d.classList.remove('setdlg'),{once:true});
+  $('aiTest').onclick=async()=>{ const b=$('aiTest'), r=$('aiRes'); b.disabled=true; r.innerHTML='<span class="note"><span class="spin"></span>正在問 Claude…（第一次可能要十幾秒）</span>';
+    try{ await api.put('/api/ai/models',{best:$('sMBest').value,fast:$('sMFast').value}); const j=await api.post('/api/ai/test',{}); const T=j.tests||{};
+      r.innerHTML=j.tests?Object.entries({best:'校對',fast:'翻譯'}).map(([k,l])=>{ const t=T[k]||{}; return `<div class="aitest ${t.ok?'ok':'bad'}">${t.ok?'✓':'✗'} ${l}：${esc((M.find(x=>x[0]===t.model)||[])[1]||t.model)}${t.ok?`，${t.secs} 秒`:` — ${esc(t.error||'失敗')}`}</div>`; }).join('')+(j.hint?`<div class="aitest bad">→ ${esc(j.hint)}</div>`:''):`<div class="aitest bad">✗ ${esc(j.error||'失敗')}${j.hint?'　'+esc(j.hint):''}</div>`;
+    }catch(e){ r.innerHTML=`<div class="aitest bad">✗ ${esc(e.message)}</div>`; } b.disabled=false; };
+  api.get('/api/storage').then(L=>{ if(!$('sStor')) return; $('sStor').innerHTML=L.map((o,i)=>`<label class="sopt"><input type="radio" name="stor" value="${i}"${o.current?' checked':''}><span class="sot"><b>${o.kind==='local'?'💻':'☁'} ${esc(o.label)}</b>${o.current?' <span class="tag">目前</span>':o.hasLibrary?' <span class="tag">已有書庫，會合併</span>':''}<small>${esc(o.path)}</small></span></label>`).join('')+(L.length<2?'<span class="note">這台電腦沒找到 Google 雲端硬碟或 OneDrive。</span>':''); $('sStor')._opts=L; }).catch(()=>{});
   const removed=new Set();
   $('sCats').onclick=e=>{ const b=e.target.closest('[data-rmcat]'); if(!b) return; const c=b.dataset.rmcat, k=LIB.books.filter(x=>x.category===c).length;
     if(k&&!confirm(`刪除分類「${c}」？裡面的 ${k} 本書會變成未分類（書不會刪掉）。`)) return; removed.add(c); b.closest('.catrow').remove(); };
@@ -648,6 +703,7 @@ function openSettings(){
     setFs(+$('sFs').value); LS.set('aiParse',$('sAi').checked);
     const rename={}, cats=[]; d.querySelectorAll('#sCats input[data-old]').forEach(i=>{ const v=i.value.trim()||i.dataset.old; if(cats.includes(v)) return; cats.push(v); if(v!==i.dataset.old) rename[i.dataset.old]=v; });
     try{ const prof=await api.put('/api/profile',{name:$('sName').value});
+      CAPS.aiModels=await api.put('/api/ai/models',{best:$('sMBest').value,fast:$('sMFast').value});
       if(removed.size||Object.keys(rename).length){ LIB=await api.put('/api/categories',{categories:cats,rename});
         if(FILTER.startsWith('c:')){ const c=FILTER.slice(2); if(rename[c]) FILTER='c:'+rename[c]; else if(removed.has(c)) FILTER='all'; LS.set('filter',FILTER); } }
       LIB.profile=prof;

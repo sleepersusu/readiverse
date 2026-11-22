@@ -301,6 +301,15 @@ def clean_pages(pages, frozen=()):
                 if prev and not re.search(r'[.!?:;"”’)]$', prev.strip()) and m: x = m.group(2)
             keep.append(x)
         pages[p] = keep
+    # 3.5) 被切成兩段的句子：上一段沒有句尾標點、下一段小寫開頭 → 接起來（掃描書常見：「That was / the end of…」）
+    for p, pg in enumerate(pages):
+        if p in frozen: continue
+        out = []
+        for x in pg:
+            if is_text(x) and out and is_text(out[-1]) and not re.search(r'[.!?:;"”’)\]—–]$', out[-1].strip()) and re.match(r'[a-z]', x):
+                out[-1] = (out[-1][:-1] if re.search(r'[A-Za-z]-$', out[-1]) else out[-1] + ' ') + x
+            else: out.append(x)
+        pages[p] = out
     # 4) 跨頁斷字：這頁最後是「ex-」，下一頁開頭是「pected …」→ 接回這一頁
     for p in range(n - 1):
         if p in frozen or (p + 1) in frozen: continue
@@ -313,6 +322,74 @@ def clean_pages(pages, frozen=()):
             if m.group(2).strip(): pages[p + 1][b[0]] = m.group(2).strip()
             else: pages[p + 1].pop(b[0])
     return pages
+
+
+# ---------- 辨識品質：每一頁有多少「字典裡查不到的字」或怪符號（norm.alcy、W3S、himsel£）----------
+QUALITY_THR = 0.04          # 超過 4% 的字有問題：算有亂碼
+AUTO_FIX_MAX = 20           # 每本書最多自動請 AI 修幾頁（省額度）；剩下的頁碼旁邊顯示 ⚠，自己按 ✦ 修
+
+
+def _known(w):
+    D = rv_dict.local_dict().get('d', {})
+    if not D: return True                                     # 沒有本機字典：不判斷
+    w = w.lower().strip("'’")
+    if w in D: return True
+    for suf, r in (('ies', 'y'), ('es', ''), ('s', ''), ('ied', 'y'), ('ed', ''), ('ed', 'e'), ('ing', ''), ('ing', 'e'), ("'s", ''), ('’s', ''), ('ly', ''), ("n't", ''), ('n’t', '')):
+        if w.endswith(suf) and (w[:-len(suf)] + r) in D: return True
+    return False
+
+
+def garble(pg):
+    toks = re.findall(r'\S+', ' '.join(x for x in pg if is_text(x))); bad = n = 0
+    for t in toks:
+        core = t.strip('.,;:!?"“”‘’()[]—–-*')
+        if not core: continue
+        n += 1
+        if re.search(r'[£<>~|\\{}^]|\d[A-Za-z]|[A-Za-z]\d|[a-z][.;:][a-z]', core): bad += 1; continue
+        if re.fullmatch(r"[A-Za-z'’-]+", core) and core[0].islower() and '-' not in core and not _known(core): bad += 1
+    return (bad / n if n else 0.0), bad
+
+
+def bad_pages(pages):
+    out = []
+    for i, pg in enumerate(pages):
+        sc, nb = garble(pg)
+        if sc > QUALITY_THR and nb >= 3: out.append((sc, i))
+    return [i for sc, i in sorted(out, reverse=True)]
+
+
+QQ = queue.Queue()
+
+
+def quality_worker():
+    while True:
+        bid = QQ.get()
+        try: quality_job(bid)
+        except Exception as e: update_book(bid, fix={'status': 'error', 'error': str(e)[:300]})
+
+
+def quality_job(bid):
+    d = os.path.join(LIB, bid)
+    with LOCK:
+        pages = read_json(os.path.join(d, 'pages.json')) or []
+        frozen = used_pages(read_json(os.path.join(d, 'state.json'), {}))
+    bad = [i for i in bad_pages(pages) if i not in frozen]
+    todo = bad[:AUTO_FIX_MAX]
+    update_book(bid, fix={'status': 'running', 'done': 0, 'total': len(todo)})
+    for k, i in enumerate(todo):
+        try: new = ai_clean_page(pages[i])
+        except RuntimeError as e:
+            update_book(bid, fix={'status': 'error', 'error': str(e)[:300], 'done': k, 'total': len(todo)}); break
+        with LOCK:
+            cur = read_json(os.path.join(d, 'pages.json')) or []
+            if i < len(cur) and i not in used_pages(read_json(os.path.join(d, 'state.json'), {})):
+                cur[i] = new; write_json(os.path.join(d, 'pages.json'), cur); pages = cur
+        update_book(bid, fix={'status': 'running', 'done': k + 1, 'total': len(todo), 'rev': int(time.time() * 1000)})
+    else:
+        update_book(bid, fix={'status': 'done', 'done': len(todo), 'total': len(todo)})
+    with LOCK:
+        pages = read_json(os.path.join(d, 'pages.json')) or []
+        update_book(bid, ocrBad=bad_pages(pages))
 
 
 # ---------- Docling：版面解析（圖片、表格、段落）。裝在 Readiverse 自己的 Python 3.12 環境 ----------
@@ -343,10 +420,15 @@ def _find_py310():
 
 def docling_setup(force=False):
     """檢查 Docling 能不能用，不能用就在背景安裝（約 2 GB，第一次要幾分鐘）"""
-    def ok():
-        try: return os.path.exists(VPY) and subprocess.run([VPY, '-c', 'import docling'], capture_output=True, timeout=120).returncode == 0
+    PKGS = ['docling'] + (['ocrmac'] if sys.platform == 'darwin' else [])     # ocrmac：用 Mac 內建的 Apple Vision 辨識掃描書
+    def ok(mod='docling'):
+        try: return os.path.exists(VPY) and subprocess.run([VPY, '-c', 'import ' + mod], capture_output=True, timeout=120).returncode == 0
         except Exception: return False
     if ok():
+        if sys.platform == 'darwin' and not ok('ocrmac'):           # 以前裝的環境沒有 ocrmac：補裝（很快）
+            uv = _find_uv()
+            try: subprocess.run([uv, 'pip', 'install', '-q', '-p', VPY, 'ocrmac'] if uv else [VPY, '-m', 'pip', 'install', '-q', 'ocrmac'], capture_output=True, timeout=600)
+            except Exception: pass
         DOCLING.update(status='ready', error=''); DOCLING_READY.set(); return
     if os.environ.get('READIVERSE_NO_DOCLING'):
         DOCLING.update(status='unavailable', error='已關閉'); return
@@ -356,12 +438,12 @@ def docling_setup(force=False):
     try:
         uv = _find_uv()
         if uv:
-            cmds = [[uv, 'venv', '-q', '--allow-existing', '-p', '3.12', VENV], [uv, 'pip', 'install', '-q', '-p', VPY, 'docling']]
+            cmds = [[uv, 'venv', '-q', '--allow-existing', '-p', '3.12', VENV], [uv, 'pip', 'install', '-q', '-p', VPY] + PKGS]
         else:
             py = _find_py310()
             if not py:
                 DOCLING.update(status='unavailable', error='需要 Python 3.10 以上（或 uv）才能裝 Docling'); return
-            cmds = [[py, '-m', 'venv', VENV], [VPY, '-m', 'pip', 'install', '-q', 'docling']]
+            cmds = [[py, '-m', 'venv', VENV], [VPY, '-m', 'pip', 'install', '-q'] + PKGS]
         for c in cmds:
             log.write('$ %s\n' % ' '.join(c)); log.flush()
             r = subprocess.run(c, stdout=log, stderr=log, timeout=3600)
@@ -416,7 +498,8 @@ def parse_job(bid):
         for line in p.stdout:
             try: j = json.loads(line)
             except ValueError: continue
-            if 'total' in j: total = j['total']; continue
+            if 'total' in j:
+                total = j['total']; update_book(bid, scanned=bool(j.get('scanned')), ocr=j.get('ocr') or ''); continue
             with LOCK:
                 if not find_book(load_index(), bid): p.kill(); return      # 書被刪掉了
                 if 'pages' in j:
@@ -443,8 +526,9 @@ def parse_job(bid):
         update_book(bid, parse={'status': 'error', 'error': 'Docling 解析失敗（代碼 %s）' % p.returncode}); return
     with LOCK:
         pages = read_json(os.path.join(d, 'pages.json')) or []
-        update_book(bid, parse={'status': 'done', 'next': total, 'total': total, 'rev': int(time.time() * 1000)},
-                    hasText=sum(len(page_text(pg)) for pg in pages) > 40)
+        b = update_book(bid, parse={'status': 'done', 'next': total, 'total': total, 'rev': int(time.time() * 1000)},
+                        hasText=sum(len(page_text(pg)) for pg in pages) > 40)
+    if b and b.get('scanned'): QQ.put(bid)              # 掃描書：檢查每一頁有沒有辨識錯字
 
 
 def start_parse(bid, restart=False):
@@ -747,7 +831,9 @@ class H(BaseHTTPRequestHandler):
                     pages = read_json(os.path.join(d, 'pages.json')) or []
                     if pno in used_pages(read_json(os.path.join(d, 'state.json'), {})): return self.err(409, '這一頁剛剛加了標記，沒有套用')
                     pages[pno] = new; write_json(os.path.join(d, 'pages.json'), pages)
-                return self.send(200, {'page': new})
+                    bb = [i for i in (b.get('ocrBad') or []) if i != pno or garble(new)[0] > QUALITY_THR]
+                    update_book(bid, ocrBad=bb)
+                return self.send(200, {'page': new, 'ocrBad': bb})
             if sub == 'cover' and m == 'PUT':
                 data = self.body_bytes()
                 if data[:2] != b'\xff\xd8': return self.err(400, '封面要是 JPEG')
@@ -787,6 +873,7 @@ def main():
     threading.Thread(target=ai_worker, daemon=True).start()
     rv_dict.init(lambda: LIB, ai_json)
     threading.Thread(target=parse_worker, daemon=True).start()
+    threading.Thread(target=quality_worker, daemon=True).start()
     threading.Thread(target=docling_setup, daemon=True).start()
     with LOCK:                                   # 上次沒做完的：接著做
         for b in load_index()['books']:

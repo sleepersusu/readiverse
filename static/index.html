@@ -250,6 +250,8 @@ mark.hl.lit{box-shadow:0 0 0 2px var(--ink)}
 .tbl th{background:var(--soft);font-weight:600}
 .aipg{width:28px;height:28px;margin-left:8px;color:var(--muted)}
 .aipg:hover:not(:disabled){color:var(--acc)}
+.ocrwarn{margin-left:6px;min-height:24px;padding:1px 9px;font-size:11.5px;border-radius:999px;border:1px solid #e0a100;color:#9a6b00;background:#fff8e1}
+:root[data-theme="dark"] .ocrwarn{background:#2a2200;color:#ffcc4d;border-color:#7a5e00}
 .rhead .L{align-items:center!important;display:block!important}
 .pgsub{font-family:var(--f-mono);font-size:11px;color:var(--acc);margin-left:6px}
 .notext{border:1.5px dashed var(--line);border-radius:12px;padding:28px;text-align:center;color:var(--muted)}
@@ -447,9 +449,10 @@ function aiTag(b){ const a=b.ai||{}, r=b.parse||{}, sp='<span class="spin"></spa
   if(r.status==='running') return `<span class="aist" title="Docling 在背景解析版面：分段、圖片、表格">${sp}版面解析中${r.total?` ${Math.min(r.next||0,r.total)}/${r.total} 頁`:''}</span>`;
   if(r.status==='queued') return `<span class="aist">${sp}${CAPS.docling&&CAPS.docling.status==='installing'?'等 Docling 安裝好':'等待版面解析'}</span>`;
   if(a.status==='running'||a.status==='queued') return `<span class="aist">${sp}AI 判斷書名、分類中</span>`;
+  const fx=b.fix||{}; if(fx.status==='running') return `<span class="aist" title="掃描書：AI 正在修正辨識錯字比較多的頁">${sp}AI 修正錯字中 ${fx.done||0}/${fx.total||0} 頁</span>`;
   if(r.status==='error') return `<span class="aist bad" title="${esc(r.error||'')}">版面解析失敗</span>`;
   if(a.status==='error') return `<span class="aist bad" title="${esc(a.error||'')}">AI 判斷失敗</span>`; return ''; }
-const busy=b=>['running','queued'].includes((b.ai||{}).status)||['running','queued'].includes((b.parse||{}).status);
+const busy=b=>['running','queued'].includes((b.ai||{}).status)||['running','queued'].includes((b.parse||{}).status)||(b.fix||{}).status==='running';
 let CAPS={}; async function loadCaps(){ try{ CAPS=await api.get('/api/caps'); }catch(e){} }
 let libPollT=null;
 function pollLib(){ clearTimeout(libPollT); if(LIB.books.some(busy)) libPollT=setTimeout(async()=>{ if(!$('vLib').hidden){ try{ await loadCaps(); LIB=await api.get('/api/library'); renderLib(true); }catch(e){} } else pollLib(); },4000); }
@@ -844,7 +847,7 @@ function renderPage(){
   const cards=cardsOfPage(PG).filter(o=>o.nid&&ST.notes[o.nid]), byPara={}; cards.forEach(o=>(byPara[o.i]=byPara[o.i]||[]).push(o));
   const pn=ST.pageNotes[PG];
   let h=`<div class="gut" role="separator" aria-orientation="vertical" aria-label="拖曳調整左右寬度" tabindex="0"></div>
-    <div class="r2 rhead"><div class="L"><div class="ptop"><span class="pgsep">第 ${PG+1} 頁 ／ 共 ${n} 頁</span>${P.some(isTxt)?`<button type="button" class="ib ghost aipg" data-aipage${used||aiBusy?' disabled':''} title="${used?'這一頁已經有螢光筆、筆記或翻譯，不能再重新整理':aiBusy?'AI 整理中…':'這一頁排版怪怪的？用 AI 整理這一頁（重新分段、修正 OCR 錯字）'}" aria-label="用 AI 整理這一頁">${aiBusy?'<span class="spin"></span>':'<svg class="i" viewBox="0 0 24 24"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 15l.6 1.4L7 17l-1.4.6L5 19l-.6-1.4L3 17l1.4-.6z"/></svg>'}</button>`:''}${AIPG_ERR[PG]?`<span class="err" style="margin-left:8px">${esc(AIPG_ERR[PG])}</span>`:''}<span class="grow"></span>${pgNav(n,1)}</div></div><div class="R"><textarea id="pgNote" rows="1" placeholder="這一頁的筆記…" aria-label="這一頁的筆記">${esc(pn||'')}</textarea></div></div>`;
+    <div class="r2 rhead"><div class="L"><div class="ptop"><span class="pgsep">第 ${PG+1} 頁 ／ 共 ${n} 頁</span>${P.some(isTxt)?`<button type="button" class="ib ghost aipg" data-aipage${used||aiBusy?' disabled':''} title="${used?'這一頁已經有螢光筆、筆記或翻譯，不能再重新整理':aiBusy?'AI 整理中…':'這一頁排版怪怪的？用 AI 整理這一頁（重新分段、修正 OCR 錯字）'}" aria-label="用 AI 整理這一頁">${aiBusy?'<span class="spin"></span>':'<svg class="i" viewBox="0 0 24 24"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 15l.6 1.4L7 17l-1.4.6L5 19l-.6-1.4L3 17l1.4-.6z"/></svg>'}</button>`:''}${(BOOK.meta.ocrBad||[]).includes(PG)&&!aiBusy?`<button type="button" class="ocrwarn" data-aipage${used?' disabled':''} title="${used?'這頁可能有辨識錯字，但已經有螢光筆或筆記，不能再整理':'這頁可能有辨識錯字（掃描書），按一下用 AI 修正'}">⚠ 可能有錯字</button>`:''}${AIPG_ERR[PG]?`<span class="err" style="margin-left:8px">${esc(AIPG_ERR[PG])}</span>`:''}<span class="grow"></span>${pgNav(n,1)}</div></div><div class="R"><textarea id="pgNote" rows="1" placeholder="這一頁的筆記…" aria-label="這一頁的筆記">${esc(pn||'')}</textarea></div></div>`;
   if(!P.length) h+=`<div class="r2"><div class="L"><div class="notext">${BOOK.meta.hasText?'這一頁沒有文字（可能是圖片或空白頁）。':'這本 PDF 是掃描圖片，抽不出文字。'}<br><button type="button" class="small" style="margin-top:10px" data-mode-go="pdf">看原始頁面</button></div></div><div class="R"></div></div>`;
   else h+=P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div><div class="R"></div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para" id="en${i}"><span class="no">${++tn}</span><div class="ptx" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div>
     <div class="R">${(byPara[i]||[]).map(o=>cardHtml(o)).join('')}${paraNoteHtml(PG,i)}</div></div>`).join('');
@@ -854,7 +857,7 @@ function renderPage(){
 function pageUsed(p){ return Object.keys(ST.marks).some(k=>k.startsWith(p+':')&&ST.marks[k].length)||Object.keys(ST.paraNotes).some(k=>k.startsWith(p+':'))||!!ST.zh[p]||Object.values(ST.notes).some(x=>x.page===p); }
 const AIPG={}, AIPG_ERR={};
 async function aiPage(p){ const id=BOOK.meta.id; AIPG[p]=1; delete AIPG_ERR[p]; renderPage();
-  try{ const j=await api.post(`/api/books/${id}/ai-page`,{page:p}); if(BOOK&&BOOK.meta.id===id){ BOOK.pages[p]=j.page; toast('這一頁整理好了'); } }
+  try{ const j=await api.post(`/api/books/${id}/ai-page`,{page:p}); if(BOOK&&BOOK.meta.id===id){ BOOK.pages[p]=j.page; if(j.ocrBad) BOOK.meta.ocrBad=j.ocrBad; toast('這一頁整理好了'); } }
   catch(e){ AIPG_ERR[p]=e.message; } finally{ delete AIPG[p]; if(BOOK&&BOOK.meta.id===id&&p===PG&&MODE==='text') renderPage(); } }
 /* ---------- 一頁一個畫面：放不下的段落移到下一個畫面（不用上下捲動） ---------- */
 let SUB=0, SUBN=1, SUB_END=false, SUBG=[];
@@ -929,7 +932,7 @@ function showPop(x,y,ctx){
     +(isDict?`<button type="button" class="ib ghost" data-a="word" title="收藏單字 ◆（之後所有書裡都會畫底線）" aria-label="收藏單字" style="color:var(--vw)"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l7 9-7 9-7-9z"/></svg></button>`:'')
     +(isSent?`<button type="button" class="ib ghost" data-a="phr" title="收藏句子 ✦（AI 會整理句型、例句）" aria-label="收藏句子" style="color:var(--ph)">${ICP}</button>`:'')
     +`<span class="sep"></span><button type="button" class="ib ghost" data-a="note" title="寫筆記" aria-label="寫筆記"><svg class="i" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></svg></button>`
-    +(ctx.existing?`<button type="button" class="ib ghost" data-a="clear" title="清除螢光筆" aria-label="清除螢光筆"><svg class="i" viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></button>`:'')
+    +(ctx.existing||ctx.hasMark?`<button type="button" class="ib ghost" data-a="clear" title="清除螢光筆" aria-label="清除螢光筆"><svg class="i" viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></button>`:'')
     +`<button type="button" class="ib ghost" data-a="copy" title="複製" aria-label="複製"><svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg></button>`;
   document.body.appendChild(d); POP=d;
   const w=d.offsetWidth, h=d.offsetHeight; d.style.left=Math.max(8,Math.min(innerWidth-w-8,x-w/2))+'px'; d.style.top=(y-h-10<64?y+28:y-h-10)+'px';
@@ -947,7 +950,8 @@ $('sheet').addEventListener('mouseup',()=>setTimeout(()=>{
   const sel=getSelection(); if(!sel||sel.isCollapsed||!sel.rangeCount) return; const range=sel.getRangeAt(0);
   if(!$('sheet').contains(range.commonAncestorContainer)) return;
   const segs=selSegs(range); if(!segs.length) return;
-  const rc=range.getBoundingClientRect(); showPop(rc.left+rc.width/2,rc.top,{segs,quote:quoteOf(segs),existing:null}); },10));
+  const hasMark=segs.some(([i,s,e])=>(ST.marks[mkey(PG,i)]||[]).some(r=>r[0]<e&&r[1]>s));     // 選到的地方有螢光筆：可以清除
+  const rc=range.getBoundingClientRect(); showPop(rc.left+rc.width/2,rc.top,{segs,quote:quoteOf(segs),existing:null,hasMark}); },10));
 document.addEventListener('mousedown',e=>{ if(POP&&!e.target.closest('.hlpop')) hidePop(); });
 $('rs').addEventListener('scroll',()=>hidePop(),{passive:true});
 

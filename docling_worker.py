@@ -9,22 +9,50 @@
 """
 import json, os, sys
 
+def is_scanned(pd):
+    """抽樣幾頁：整頁幾乎都是一張圖 → 掃描書"""
+    import pypdfium2.raw as R
+    n = len(pd); idx = sorted({min(n - 1, int(n * f)) for f in (0.1, 0.3, 0.5, 0.7, 0.9)}) if n else []
+    hit = 0
+    for i in idx:
+        pg = pd[i]; W, H = pg.get_size(); best = 0
+        for obj in pg.get_objects(filter=[R.FPDF_PAGEOBJ_IMAGE], max_depth=2):
+            l, b, r, t = obj.get_bounds(); best = max(best, max(0, r - l) * max(0, t - b) / (W * H))
+        if best > 0.8: hit += 1
+    return bool(idx) and hit >= max(1, len(idx) * 0.6)
+
+
+def has_ocrmac():
+    try:
+        import ocrmac  # noqa
+        return True
+    except Exception: return False
+
+
 def main():
     pdf, figdir = sys.argv[1], sys.argv[2]
     chunk = int(sys.argv[3]) if len(sys.argv) > 3 else 20
     start = int(sys.argv[4]) if len(sys.argv) > 4 else 1
     os.makedirs(figdir, exist_ok=True)
     import pypdfium2
-    total = len(pypdfium2.PdfDocument(pdf))
-    print(json.dumps({'total': total}), flush=True)
+    pd = pypdfium2.PdfDocument(pdf)
+    total = len(pd)
+    scanned = is_scanned(pd)
+    use_vision = scanned and sys.platform == 'darwin' and has_ocrmac()
+    print(json.dumps({'total': total, 'scanned': scanned, 'ocr': 'apple-vision' if use_vision else ''}), flush=True)
 
     from docling.document_converter import DocumentConverter, PdfFormatOption
     from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.datamodel.pipeline_options import PdfPipelineOptions, OcrMacOptions
     from docling_core.types.doc import PictureItem, TableItem, TextItem
 
     o = PdfPipelineOptions()
-    o.do_ocr = False                    # 用 PDF 裡現成的文字（掃描書已經有 OCR 層，重做反而會把字黏在一起）
+    if use_vision:
+        # 掃描書：PDF 裡原本那層 OCR 文字常常很爛（norm.alcy、v.rere、W3S），用 Mac 內建的 Apple Vision 整頁重新辨識
+        o.do_ocr = True
+        o.ocr_options = OcrMacOptions(force_full_page_ocr=True, lang=['en-US'])
+    else:
+        o.do_ocr = False                # 數位書：直接用 PDF 裡的文字（最準）
     o.generate_picture_images = True
     o.generate_table_images = True
     o.images_scale = 2.0

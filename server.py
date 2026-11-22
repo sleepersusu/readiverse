@@ -355,6 +355,39 @@ def ai_json(prompt, want=list, timeout=300, kind='fast'):
 
 
 
+
+def all_notes():
+    """首頁「我的筆記」：每一本書的筆記（螢光筆筆記、問 AI 的問答、段落筆記、頁筆記）集中在一起"""
+    out = []
+    for b in load_index()['books']:
+        d = os.path.join(LIB, b['id']); st = read_json(os.path.join(d, 'state.json'), {}) or {}
+        notes, paraN, pageN = st.get('notes') or {}, st.get('paraNotes') or {}, st.get('pageNotes') or {}
+        if not (notes or paraN or pageN): continue
+        pages = None
+        def para_text(p, i):
+            nonlocal pages
+            if pages is None: pages = read_json(os.path.join(d, 'pages.json'), []) or []
+            try: t = pages[p][i]; return t if isinstance(t, str) else ''
+            except (IndexError, TypeError): return ''
+        color = {}
+        for k, L in (st.get('marks') or {}).items():
+            for r in L or []:
+                if len(r) > 3 and r[3]: color[r[3]] = r[2]
+        base = {'bid': b['id'], 'title': b.get('title') or '', 'author': b.get('author') or ''}
+        for nid, n in notes.items():
+            if not str((n or {}).get('text') or '').strip(): continue
+            out.append(dict(base, kind='note', id=nid, page=n.get('page') or 0, i=n.get('i') or 0, text=n['text'], quote=n.get('quote') or '',
+                            t=n.get('t') or 0, c=color.get(nid, 0), qa=str(n['text']).lstrip().startswith('Q：')))
+        for k, v in paraN.items():
+            if not str(v or '').strip() or ':' not in k: continue
+            p, i = (int(x) for x in k.split(':')[:2])
+            out.append(dict(base, kind='para', id=k, page=p, i=i, text=v, quote=para_text(p, i)[:300], t=0, c=0, qa=str(v).lstrip().startswith('Q：')))
+        for p, v in pageN.items():
+            if not str(v or '').strip(): continue
+            out.append(dict(base, kind='page', id='p' + str(p), page=int(p), i=0, text=v, quote='', t=0, c=0, qa=False))
+    return out
+
+
 def ai_text(prompt, timeout=240, kind='best'):
     """問 AI，回傳一般文字（問 AI 的回答）"""
     cmds = ai_cmds(prompt, ai_model(kind))
@@ -1316,6 +1349,8 @@ class H(BaseHTTPRequestHandler):
                 ix = load_index(); ix['profile'] = {'name': str(j.get('name') or '').strip()[:40]}
                 save_index(ix)
             return self.send(200, ix['profile'])
+        if p == ['notes'] and m == 'GET':               # 首頁「我的筆記」
+            return self.send(200, all_notes())
         if p == ['ask'] and m == 'POST':                # 選取文字問 AI
             try: return self.send(200, ask_ai(self.body_json()))
             except ValueError as e: return self.err(400, str(e))

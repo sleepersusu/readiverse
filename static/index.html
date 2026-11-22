@@ -47,8 +47,8 @@ textarea{width:100%;line-height:1.6;border:1px solid var(--line);border-radius:8
 .top{position:sticky;top:0;z-index:15;display:flex;align-items:center;gap:6px 18px;padding:0 clamp(16px,3.5vw,48px);height:56px;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
 .brand{font-family:var(--f-read);font-weight:600;font-size:21px;letter-spacing:-.01em;display:flex;align-items:center;gap:8px;cursor:pointer;border:0;background:none;padding:0;min-height:0;white-space:nowrap}
 .brand .dot{width:10px;height:10px;border-radius:50%;background:var(--acc)}
-.nav{display:flex;gap:2px}
-.nav button{border:0;background:none;min-height:32px;padding:4px 10px;font-size:14px;color:var(--muted);border-radius:6px}
+.nav{display:flex;gap:2px;flex-shrink:0}
+.nav button{border:0;background:none;min-height:32px;padding:4px 10px;font-size:14px;color:var(--muted);border-radius:6px;white-space:nowrap}
 .nav button:hover{color:var(--ink);background:var(--soft)}
 .nav button.on{color:var(--ink);font-weight:600;background:none!important;border:0!important}
 @media (max-width:900px){.nav{display:none}}
@@ -345,7 +345,7 @@ mark.hl.lit{box-shadow:0 0 0 2px var(--ink)}
 .saybtn{width:30px;height:30px;min-height:0;padding:0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
 /* 首頁上方的入口 icon */
 .colbtn{position:relative;width:34px;height:34px;min-height:0;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--surface);display:inline-flex;align-items:center;justify-content:center}
-.colbtn.vwb{color:var(--vw)} .colbtn.phb{color:var(--ph)}
+.colbtn.vwb{color:var(--vw)} .colbtn.phb{color:var(--ph)} .colbtn.nbb{color:var(--ink)}
 .colbtn:hover{border-color:currentColor}
 .colbtn.on{background:color-mix(in srgb,currentColor 12%,var(--surface))!important;border-color:currentColor!important}
 .colbtn .cn{position:absolute;top:-5px;right:-7px;font-family:var(--f-mono);font-size:9.5px;font-weight:600;background:currentColor;border-radius:999px;padding:0 4px;line-height:15px;min-width:15px;text-align:center}
@@ -473,6 +473,24 @@ dialog.setdlg form{display:flex;flex-direction:column;max-height:min(86vh,860px)
 .askfoot .note{font-size:11.5px}
 .askmore{margin-top:4px}
 .askmore .small{font-size:12px;padding:2px 8px;min-height:0}
+/* ---------- 我的筆記 ---------- */
+.nbook{margin-bottom:28px}
+.nbh{display:flex;align-items:baseline;gap:10px;margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.nbh b{font-size:16px;font-family:var(--f-read)}
+.nwall{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.ncard{border:1px solid var(--line);border-left:4px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--surface);cursor:pointer;display:flex;flex-direction:column;gap:7px;transition:border-color .12s,box-shadow .12s}
+.ncard:hover,.ncard:focus-visible{box-shadow:0 4px 14px rgba(0,0,0,.08);outline:none}
+.ncard.nc1{border-left-color:#f2d64b}.ncard.nc2{border-left-color:#8fd19e}.ncard.nc3{border-left-color:#8db8f0}.ncard.nc4{border-left-color:#f2a7c3}
+.nmeta{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+.nk{border:1px solid var(--line);border-radius:999px;padding:0 7px}
+.nk.qa{border-color:currentColor}
+.nquote{font-family:var(--f-read);font-size:14px;line-height:1.55;color:var(--muted);border-left:2px solid var(--line);padding-left:8px}
+.nbody{font-size:14px;line-height:1.65;display:flex;flex-direction:column;gap:8px}
+.ntext{white-space:pre-wrap}
+.nq{font-weight:600}
+.nq::before{content:"Q　";color:var(--muted);font-weight:400}
+.na{white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:8;-webkit-box-orient:vertical;overflow:hidden}
+.na::before{content:"A　";color:var(--muted)}
 </style></head>
 <body>
 <div class="top">
@@ -484,6 +502,7 @@ dialog.setdlg form{display:flex;flex-direction:column;max-height:min(86vh,860px)
   <span id="libTools" class="row" style="gap:10px;flex-wrap:nowrap">
     <button type="button" class="colbtn vwb" data-f="vocab" title="我的字典（收藏的單字）" aria-label="我的字典"><svg class="i" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20v3H6.5A2.5 2.5 0 0 1 4 20.5zM9 7h7M9 10.5h5"/></svg><span class="cn" id="vwN"></span></button>
     <button type="button" class="colbtn phb" data-f="phr" title="句子收藏（收藏的片語、句型）" aria-label="句子收藏"><svg class="i" viewBox="0 0 24 24"><path d="M7 7h4v4c0 3-1.5 5-4 6M14 7h4v4c0 3-1.5 5-4 6"/></svg><span class="cn" id="phN"></span></button>
+    <button type="button" class="colbtn nbb" data-f="notes" title="我的筆記（所有書的筆記、問 AI 的問答）" aria-label="我的筆記"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h7M9 16h5"/></svg><span class="cn" id="nbN"></span></button>
     <label class="srch"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" id="q" placeholder="搜尋書、單字、句子" aria-label="搜尋"></label>
     <div class="seg ic" role="group" aria-label="顯示方式"><button type="button" data-view="grid" class="ib" title="卡片模式" aria-label="卡片模式"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1"/></svg></button><button type="button" data-view="list" class="ib" title="清單模式" aria-label="清單模式"><svg class="i" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r=".8"/><circle cx="4.5" cy="12" r=".8"/><circle cx="4.5" cy="18" r=".8"/></svg></button></div>
     <label class="filebtn primary ib imp" title="匯入 PDF（也可以直接拖進視窗）" aria-label="匯入 PDF" style="border-radius:50%;padding:0"><svg class="i" viewBox="0 0 24 24"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg><input type="file" id="fileIn" accept="application/pdf,.pdf" multiple></label>
@@ -554,7 +573,7 @@ $('themeBtn').onclick=()=>setTheme(isDark()?'light':'dark');
    書庫
    ===================================================================== */
 let LIB={books:[],categories:[]}, FILTER=(f=>f==='all'?'home':f)(LS.get('filter2','home')), VIEW=LS.get('view2','grid'), SORT=LS.get('sort','opened');
-async function loadLib(){ await loadCaps(); LIB=await api.get('/api/library'); renderLib(); checkUpdate(); }
+async function loadLib(){ await loadCaps(); LIB=await api.get('/api/library'); renderLib(); checkUpdate(); loadNotes(); }
 /* ---------- 版本與自動更新（跟雅思練習室一樣）---------- */
 let UPDI={}, updT=null;
 const updSp='<span class="spin"></span>';
@@ -648,6 +667,7 @@ function renderLib(soft){
   const keep=soft?[...el.querySelectorAll('.track')].map(t=>t.scrollLeft):null, top=scrollY;
   if(FILTER==='vocab'){ el.innerHTML=vocabPage(q); colCounts(); }
   else if(FILTER==='phr'){ el.innerHTML=phrasePage(q); colCounts(); }
+  else if(FILTER==='notes'){ el.innerHTML=notesPage(q); colCounts(); loadNotes(true); }
   else if(FILTER==='home'&&!q&&VIEW==='list'&&LIB.books.length){
     const B=LIB.books, groups=[...LIB.categories.map(c=>[c,'c:'+c,B.filter(b=>b.category===c)]),['未分類','none',B.filter(b=>!b.category)]].filter(g=>g[2].length);
     el.innerHTML=`<div class="page">${groups.map(([t,f,L])=>`<div class="hd" style="margin:${f===groups[0][1]?0:30}px 0 8px"><h1 style="font-size:19px">${esc(t)}</h1><span class="cnt note">${L.length} 本</span><button type="button" class="all small ghost" data-f="${esc(f)}">查看全部 ›</button></div><div data-drop="${esc(f)}" class="shelf" style="margin:0">${listHtml(L.sort(byOpened))}</div>`).join('')}
@@ -1426,7 +1446,37 @@ function ulRanges(text){
   hits.sort((a,b)=>a[0]-b[0]||(b[1]-b[0])-(a[1]-a[0])); const keep=[]; let end=-1; hits.forEach(h=>{ if(h[0]>=end){ keep.push(h); end=h[1]; } });
   if(VOCRE){ VOCRE.lastIndex=0; let m; while((m=VOCRE.exec(text))){ const s0=m.index,e0=s0+m[0].length, v=vocOf(m[0]); if(v&&!keep.some(h=>h[0]<e0&&h[1]>s0)) keep.push([s0,e0,'vw',VOCM.indexOf(v)]); } }
   return keep.sort((a,b)=>a[0]-b[0]); }
-function colCounts(){ const v=$('vwN'), p=$('phN'); if(v) v.innerHTML=`<i>${(VLIST||[]).length}</i>`; if(p) p.innerHTML=`<i>${(PLIST||[]).length}</i>`; }
+function colCounts(){ const v=$('vwN'), p=$('phN'), nb=$('nbN'); if(v) v.innerHTML=`<i>${(VLIST||[]).length}</i>`; if(p) p.innerHTML=`<i>${(PLIST||[]).length}</i>`; if(nb) nb.innerHTML=NLIST&&NLIST.length?`<i>${NLIST.length}</i>`:''; }
+/* ---------- 我的筆記：所有書的筆記集中在一起（螢光筆筆記、問 AI 的問答、段落筆記、頁筆記）---------- */
+let NLIST=null, NBOOK=LS.get('nbook','');
+async function loadNotes(rerender){ let L; try{ L=await api.get('/api/notes'); }catch(e){ return; }
+  const ch=JSON.stringify(L)!==JSON.stringify(NLIST); NLIST=L; colCounts();
+  if(rerender&&ch&&FILTER==='notes'&&!$('vLib').hidden){ const y=scrollY; $('vLib').innerHTML=notesPage($('q').value.trim().toLowerCase()); scrollTo(0,y); } }
+function noteBody(t){ const Q=qaOf(t); const pre=Q.pre?`<div class="ntext">${esc(Q.pre)}</div>`:'';
+  return pre+Q.qa.map(x=>`<div class="nqa"><div class="nq">${esc(x.q)}</div><div class="na">${esc(x.a)}</div></div>`).join(''); }
+function notesPage(q){
+  if(!NLIST) return `<div class="page"><div class="note"><span class="spin"></span>讀取筆記…</div></div>`;
+  const books=[...new Map(NLIST.map(n=>[n.bid,n.title])).entries()];
+  if(NBOOK&&!books.some(b=>b[0]===NBOOK)) NBOOK='';
+  const L=NLIST.filter(n=>(!NBOOK||n.bid===NBOOK)&&(!q||[n.text,n.quote,n.title].join(' ').toLowerCase().includes(q)));
+  const by=new Map(); L.forEach(n=>{ if(!by.has(n.bid)) by.set(n.bid,[]); by.get(n.bid).push(n); });
+  const kindName=n=>n.kind==='page'?'這一頁的筆記':n.qa?'問 AI':n.kind==='para'?'段落筆記':'筆記';
+  const card=n=>`<div class="ncard nc${n.c||0}" data-nopen="${esc(n.bid)}" data-pg="${n.page}" data-i="${n.i}" data-nid="${n.kind==='note'?esc(n.id):''}" role="button" tabindex="0">
+      <div class="nmeta"><span>第 ${n.page+1} 頁</span><span class="nk${n.qa?' qa':''}">${kindName(n)}</span></div>
+      ${n.quote?`<div class="nquote" lang="en">${esc(n.quote.length>260?n.quote.slice(0,260)+'…':n.quote)}</div>`:''}
+      <div class="nbody">${noteBody(n.text)}</div></div>`;
+  return `<div class="page"><div class="hd"><button type="button" class="ib" data-f="home" title="回首頁" aria-label="回首頁">${IC.l}</button><span style="display:flex">${'<svg class="i" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h7M9 16h5"/></svg>'}</span><h1>我的筆記</h1><span class="cnt note">${NLIST.length} 則</span><span class="grow"></span>
+      ${books.length>1?`<select id="nbook" aria-label="只看哪一本書"><option value="">全部的書</option>${books.map(([id,t])=>`<option value="${esc(id)}"${id===NBOOK?' selected':''}>${esc(t)}</option>`).join('')}</select>`:''}</div>
+    <p class="note" style="margin:-8px 0 18px">讀書時寫的筆記、問 AI 存下來的問答都在這裡。點一則就會打開那本書、跳到那一段。用上方搜尋框可以找筆記。</p>
+    ${q?`<div class="note" style="margin-bottom:8px">篩選「${esc(q)}」：${L.length} 則</div>`:''}
+    ${L.length?[...by.entries()].map(([bid,A])=>`<div class="nbook"><div class="nbh"><b>${esc(A[0].title)}</b>${A[0].author?`<span class="note">${esc(A[0].author)}</span>`:''}<span class="note">${A.length} 則</span></div>
+        <div class="nwall">${A.sort((a,b)=>a.page-b.page||a.i-b.i).map(card).join('')}</div></div>`).join('')
+      :`<div class="empty"><b>${q||NBOOK?'沒有符合的筆記':'還沒有筆記'}</b><span class="note">讀書時選取文字，按 ✎ 寫筆記，或按 💬 問 AI 再存成筆記，就會出現在這裡。</span></div>`}</div>`; }
+document.addEventListener('change',e=>{ if(e.target.id==='nbook'){ NBOOK=e.target.value; LS.set('nbook',NBOOK); renderLib(); } });
+async function openNote(el){ const bid=el.dataset.nopen, pg=+el.dataset.pg, i=+el.dataset.i, nid=el.dataset.nid||'';
+  await openBook(bid); if(!BOOK||BOOK.meta.id!==bid) return; setTimeout(()=>jumpTo(pg,i,nid),60); }
+document.addEventListener('click',e=>{ const c=e.target.closest('[data-nopen]'); if(c&&!getSelection().toString()) openNote(c); });
+document.addEventListener('keydown',e=>{ if(e.key==='Enter'&&e.target.matches&&e.target.matches('[data-nopen]')) openNote(e.target); });
 
 /* ---------- 小卡片 ---------- */
 function hideCard(){ if(WCARD){ WCARD.remove(); WCARD=null; } }

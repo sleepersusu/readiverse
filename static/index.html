@@ -315,10 +315,10 @@ mark.hl.lit{box-shadow:0 0 0 2px var(--ink)}
 @media (prefers-color-scheme:dark){:root[data-theme="system"]{--vw:#4fd1bd;--ph:#a99cff}}
 .vw{text-decoration:underline;text-decoration-color:var(--vw);text-decoration-thickness:2.5px;text-underline-offset:5px;text-decoration-skip-ink:none;cursor:pointer}
 .vw{white-space:nowrap}
-.vw.last::after{content:"◆";display:inline-block;text-indent:0;text-decoration:none;font-size:.45em;color:var(--vw);vertical-align:super;margin-left:2px;font-family:sans-serif}
+.vw.last::after{content:"◆";display:inline-block;position:absolute;right:-.55em;top:-.15em;line-height:1;text-indent:0;text-decoration:none;font-size:.45em;color:var(--vw);vertical-align:super;margin-left:2px;font-family:sans-serif}
 .vw:hover{background:color-mix(in srgb,var(--vw) 12%,transparent);border-radius:3px}
 .ph{text-decoration:underline;text-decoration-skip-ink:none;text-decoration-color:var(--ph);text-decoration-thickness:2.5px;text-underline-offset:4px;cursor:pointer}
-.ph.last::after{content:"✦";display:inline-block;text-indent:0;text-decoration:none;font-size:.62em;color:var(--ph);vertical-align:super;margin-left:1px;font-family:sans-serif}
+.ph.last::after{content:"✦";display:inline-block;position:absolute;right:-.55em;top:-.15em;line-height:1;text-indent:0;text-decoration:none;font-size:.62em;color:var(--ph);vertical-align:super;margin-left:1px;font-family:sans-serif}
 .ph:hover{background:color-mix(in srgb,var(--ph) 12%,transparent);border-radius:3px}
 /* 小卡片（點底線） */
 .wcard{position:fixed;z-index:40;width:min(380px,calc(100vw - 24px));max-height:min(70vh,560px);overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 36px rgba(0,0,0,.18);padding:14px 16px;display:flex;flex-direction:column;gap:10px;font-size:14px}
@@ -448,6 +448,7 @@ dialog.setdlg form{display:flex;flex-direction:column;max-height:min(86vh,860px)
 .sw-toggle input:checked+span::after{transform:translateX(18px)}
 .sw-toggle input:focus-visible+span{outline:2px solid var(--ink);outline-offset:2px}
 @media (max-width:560px){.srow{flex-direction:column;align-items:stretch;gap:6px}.sc select,.sc input[type=text]{width:100%}}
+.vw.last,.ph.last{position:relative;margin-right:.5em}
 </style></head>
 <body>
 <div class="top">
@@ -1056,7 +1057,15 @@ function paginate(keep){
       if(u.fig){ if(cur.length) back.unshift(cur); back.unshift([u]); cur=[]; h=0; continue; }
       if(cur.length&&h+u.h>avail){ back.unshift(cur); cur=[]; h=0; } cur.unshift(u); h+=u.h; } if(cur.length) back.unshift(cur); }
   const G=back.concat(fwd(at)); if(!G.length) G.push([]);
-  SUBG=G; SUBN=G.length; SUB=SUB_END?SUBN-1:back.length; SUB_END=false;
+  // 標題（章名、小標）不要留在畫面最底下：跟下一段一起移到下一個畫面；下一個畫面放不下就把它最後一段再往後推
+  const isHd=u=>u&&!u.cut&&!u.fig&&!!u.r.querySelector(':scope>.L>.para.hd'), gh=g=>g.reduce((x,u)=>x+u.h,0);
+  for(let i=0;i<G.length-1;i++){ const g=G[i]; let nx=G[i+1];
+    if(!isHd(g[g.length-1])||g.length<2) continue;
+    if(nx[0]&&nx[0].fig){ nx=[]; G.splice(i+1,0,nx); }
+    while(g.length>1&&isHd(g[g.length-1])) nx.unshift(g.pop());
+    while(gh(nx)>avail&&nx.length>1){ let n2=G[i+2]; if(!n2||(n2[0]&&n2[0].fig)){ n2=[]; G.splice(i+2,0,n2); } n2.unshift(nx.pop()); } }
+  const atG=G.findIndex(g=>g.includes(U[at]));
+  SUBG=G; SUBN=G.length; SUB=SUB_END?SUBN-1:(atG>=0?atG:back.length); SUB_END=false;
   showSub(); }
 function showSub(){
   const sh=$('sheet'), rs=$('rs'), G=SUBG; SUB=Math.max(0,Math.min(SUBN-1,SUB));

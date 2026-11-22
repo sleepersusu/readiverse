@@ -224,7 +224,7 @@ dialog h2{font-family:var(--f-zh);font-size:17px;margin:0 0 14px}
 .para{display:block;border-radius:6px;transition:background .15s;max-width:860px;margin-left:auto;margin-right:auto}
 .r2{padding:6px 0}
 .para .no{font-family:var(--f-mono);font-size:11px;color:var(--muted);padding-top:.45em;text-align:right;user-select:none}
-.ptx{font-family:var(--f-read);font-size:var(--fs);line-height:1.75;hyphens:auto}
+.ptx{font-family:var(--f-read);font-size:var(--fs);line-height:1.75;hyphens:manual;-webkit-hyphens:manual}
 
 .para.flash{animation:fl 1s}
 @keyframes fl{0%,40%{background:color-mix(in srgb,var(--ink) 14%,transparent)}100%{background:transparent}}
@@ -388,7 +388,7 @@ table.vt .fg{font-family:var(--f-mono);font-size:12px;text-align:center}
 .sheet .r2>.L{padding-right:44px}
 .para{max-width:min(680px,100%)}
 .ptx *{text-indent:0}
-.ptx{color:var(--pink);text-align:justify;text-justify:inter-word;hyphens:auto;-webkit-hyphens:auto;line-height:1.72;text-indent:1.6em;margin:0;font-variant-ligatures:common-ligatures;font-kerning:normal}
+.ptx{color:var(--pink);text-align:justify;text-justify:inter-word;hyphens:manual;-webkit-hyphens:manual;overflow-wrap:normal;word-break:normal;line-height:1.72;text-indent:1.6em;margin:0;font-variant-ligatures:common-ligatures;font-kerning:normal}
 .ptx.noind{text-indent:0}
 .r2.rc+.r2.rc .para{margin-top:0}
 .para.hd{text-align:center;margin:1.4em auto .9em}

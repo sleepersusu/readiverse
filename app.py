@@ -102,4 +102,7 @@ except Exception as e:
     print('視窗版打不開（%s），改用瀏覽器。' % e)
     import webbrowser; webbrowser.open(BASE + '/')
     while True: time.sleep(3600)
+try:                                                              # 關掉視窗：拿掉書庫的「使用中」記號，別台電腦就可以直接打開
+    if "server" in sys.modules: sys.modules["server"].session_release()     # 只有伺服器是這個視窗開的才拿掉
+except Exception: pass
 os._exit(0)                                                       # 關掉視窗：Readiverse 一起結束

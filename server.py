@@ -606,6 +606,7 @@ QQ = queue.Queue()
 def quality_worker():
     while True:
         bid = QQ.get()
+        wait_session()
         try: quality_job(bid)
         except Exception as e: update_book(bid, fix={'status': 'error', 'error': str(e)[:300]})
 
@@ -797,6 +798,7 @@ PROOF_ACTIVE = set()          # 正在校對的書（同一本不會同時跑兩
 def proof_worker():
     while True:
         bid = PROOFQ.get()
+        wait_session()
         with LOCK:
             if bid in PROOF_ACTIVE: continue
             PROOF_ACTIVE.add(bid)
@@ -854,7 +856,7 @@ def proof_job(bid):
     def run_round(todo, kind, workers):
         imgdir = render_pages(bid, [i + 1 for i in todo])
         def one(i):
-            if stop[0]: return
+            if stop[0] or SESS['state'] != 'ok': return
             try: r = proof_page(bid, i, imgdir, kind)
             except RuntimeError as e: stop[0] = str(e); return
             if r is None: return
@@ -1024,6 +1026,7 @@ PARSE_PROC = {}
 def parse_worker():
     while True:
         bid = PARSEQ.get()
+        wait_session()
         DOCLING_READY.wait()
         try: parse_job(bid)
         except Exception as e:
@@ -1134,6 +1137,7 @@ def render_cover(bid, page_no):
 def ai_worker():
     while True:
         bid = AIQ.get()
+        wait_session()
         try: ai_job(bid)
         except Exception as e:
             update_book(bid, ai={'status': 'error', 'error': str(e)[:300]})
@@ -1353,6 +1357,12 @@ class H(BaseHTTPRequestHandler):
                 ix = load_index(); ix['profile'] = {'name': str(j.get('name') or '').strip()[:40]}
                 save_index(ix)
             return self.send(200, ix['profile'])
+        if p == ['session'] and m == 'GET':             # 開機檢查：這台能不能用這個書庫
+            return self.send(200, session_info())
+        if p == ['session'] and m == 'POST':            # 重新檢查／強制在這台用
+            j = self.body_json()
+            if j.get('quit'): session_release(); threading.Timer(0.5, lambda: os._exit(0)).start(); return self.send(200, {'ok': True})
+            return self.send(200, session_check(force=bool(j.get('force'))))
         if p == ['notes'] and m == 'GET':               # 首頁「我的筆記」
             return self.send(200, all_notes())
         if p == ['ask'] and m == 'POST':                # 選取文字問 AI
@@ -1647,6 +1657,7 @@ rm -rf "$TMP"
         upd_log('新版準備好了，Readiverse 關掉後會換成新版並重新打開')
         def bye():
             time.sleep(1.5)
+            session_release()
             with LOCK: os._exit(0)                     # 等正在寫的檔案寫完再關
         threading.Thread(target=bye, daemon=True).start()
     except Exception as e:
@@ -1655,11 +1666,89 @@ rm -rf "$TMP"
 
 
 
+# ---------- 一次只能一台電腦用同一個書庫（跟雅思練習室一樣）：書庫放在雲端時，避免兩台同時改、互相蓋掉 ----------
+import socket
+DEVICE = (socket.gethostname() or '這台電腦').split('.')[0]
+
+
+def _device_id():
+    """每台電腦自己的編號（放在使用者資料夾，不會跟著書庫同步），用來分辨是不是同一台"""
+    p = os.path.join(os.path.expanduser('~'), '.readiverse', 'device-id')
+    try:
+        with open(p, encoding='utf-8') as f:
+            v = f.read().strip()
+            if v: return v
+    except OSError: pass
+    v = uuid.uuid4().hex
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, 'w', encoding='utf-8') as f: f.write(v)
+    except OSError: pass
+    return v
+
+
+DEVICE_ID = _device_id()
+LOCK_FRESH = 6 * 60 * 1000          # 別台電腦 6 分鐘內有更新「使用中」記號 = 還開著（開著的每 2 分鐘更新一次）
+SESS = {'state': 'checking', 'other': None}   # checking / ok / blocked（別台正在用）/ taken（別台強制接手）
+
+
+def _lock_path(): return os.path.join(LIB, '_使用中.json')
+
+
+def _lock_write():
+    write_json(_lock_path(), {'device': DEVICE, 'id': DEVICE_ID, 't': int(time.time() * 1000)})
+
+
+def session_check(force=False):
+    """打開時：看有沒有別台電腦正在用這個書庫。沒有（或強制）就掛上「使用中」"""
+    lk = read_json(_lock_path(), {}) or {}
+    busy = lk if lk.get('id') and lk.get('id') != DEVICE_ID and time.time() * 1000 - (lk.get('t') or 0) < LOCK_FRESH else None
+    if busy and not force:
+        SESS.update(state='blocked', other={'device': busy.get('device') or '另一台電腦', 't': busy.get('t') or 0})
+    else:
+        try: _lock_write()
+        except OSError: pass
+        SESS.update(state='ok', other=None)
+    return session_info()
+
+
+def session_info():
+    return {'state': SESS['state'], 'other': SESS['other'], 'device': DEVICE, 'lib': LIB,
+            'cloud': next((x['kind'] for x in storage_options() if x['current']), 'local') != 'local'}
+
+
+def session_loop():
+    """開著的時候每 2 分鐘更新「使用中」；發現別台強制接手了，就停下來（不再寫書庫）"""
+    while True:
+        time.sleep(120)
+        if SESS['state'] != 'ok': continue
+        lk = read_json(_lock_path(), {}) or {}
+        if lk.get('id') and lk.get('id') != DEVICE_ID:
+            SESS.update(state='taken', other={'device': lk.get('device') or '另一台電腦', 't': lk.get('t') or 0}); continue
+        try: _lock_write()
+        except OSError: pass
+
+
+def session_release():
+    """關掉 Readiverse：拿掉「使用中」記號，別台電腦就可以直接打開"""
+    try:
+        lk = read_json(_lock_path(), {}) or {}
+        if lk.get('id') == DEVICE_ID: write_json(_lock_path(), {'device': '', 't': 0, 'closed': DEVICE, 'closedT': int(time.time() * 1000)})
+    except Exception: pass
+
+
+def wait_session():
+    """背景工作（解析、校對、AI）：這台拿到書庫才做；別台在用時就等"""
+    while SESS['state'] != 'ok': time.sleep(2)
+
+
 def main():
     if LIB == LOCAL_LIB and not os.path.exists(LOCAL_LIB) and os.path.isfile(os.path.join(OLD_LIB, '_index.json')):
         try: shutil.move(OLD_LIB, LOCAL_LIB); print('書庫搬到 %s' % LOCAL_LIB)
         except OSError as e: print('書庫搬家失敗：%s' % e)
     os.makedirs(LIB, exist_ok=True)
+    session_check()                                   # 別台電腦正在用：先擋住（背景工作也先等）
+    threading.Thread(target=session_loop, daemon=True).start()
     threading.Thread(target=ai_worker, daemon=True).start()
     rv_dict.init(lambda: LIB, ai_json)
     threading.Thread(target=parse_worker, daemon=True).start()
@@ -1678,6 +1767,7 @@ def main():
     if '--no-browser' not in sys.argv: threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try: srv.serve_forever()
     except KeyboardInterrupt: print('\n已關閉')
+    finally: session_release()
 
 
 if __name__ == '__main__':

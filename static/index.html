@@ -39,7 +39,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .grow{flex:1;min-width:0}
 svg.i{width:16px;height:16px;display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 textarea{width:100%;line-height:1.6;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--bg);resize:vertical;font-size:14px;font-family:var(--f-zh)}
-.spin{display:inline-block;width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:6px}
+.spin{display:inline-block;position:relative;width:14px;height:14px;vertical-align:-2px;margin-right:6px;color:inherit;animation:sp .9s steps(8) infinite}
+.spin::before{content:"";position:absolute;left:5.5px;top:0;width:3px;height:3px;border-radius:50%;background:currentColor;
+  box-shadow:3.9px 1.6px 0 color-mix(in srgb,currentColor 88%,transparent),5.5px 5.5px 0 color-mix(in srgb,currentColor 76%,transparent),3.9px 9.4px 0 color-mix(in srgb,currentColor 64%,transparent),0 11px 0 color-mix(in srgb,currentColor 52%,transparent),-3.9px 9.4px 0 color-mix(in srgb,currentColor 40%,transparent),-5.5px 5.5px 0 color-mix(in srgb,currentColor 28%,transparent),-3.9px 1.6px 0 color-mix(in srgb,currentColor 18%,transparent)}
 @keyframes sp{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation-duration:3s}}
 
@@ -174,7 +176,7 @@ table.list td.mono{font-family:var(--f-mono);font-size:12px;color:var(--muted);w
 .empty b{font-family:var(--f-zh);font-size:17px}
 #dropMask{position:fixed;inset:0;z-index:50;background:color-mix(in srgb,var(--bg) 85%,transparent);display:flex;align-items:center;justify-content:center;border:3px dashed var(--ink);font-size:20px;font-weight:600;font-family:var(--f-zh)}
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:60;background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:9px;font-size:14px;max-width:min(560px,calc(100vw - 32px));box-shadow:0 6px 20px rgba(0,0,0,.2)}
-.toast .spin{border-color:color-mix(in srgb,var(--bg) 40%,transparent);border-top-color:var(--bg)}
+.toast .spin{color:var(--bg)}
 dialog{border:1px solid var(--ink);border-radius:12px;background:var(--surface);color:var(--ink);padding:20px;width:min(440px,calc(100vw - 32px))}
 dialog::backdrop{background:rgba(0,0,0,.35)}
 dialog h2{font-family:var(--f-zh);font-size:17px;margin:0 0 14px}
@@ -491,8 +493,46 @@ dialog.setdlg form{display:flex;flex-direction:column;max-height:min(86vh,860px)
 .nq::before{content:"Q　";color:var(--muted);font-weight:400}
 .na{white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:8;-webkit-box-orient:vertical;overflow:hidden}
 .na::before{content:"A　";color:var(--muted)}
+/* ---------- 斜紋進度條（閱讀進度、開機畫面）---------- */
+.lbar{display:inline-block;position:relative;height:12px;border:1.5px solid var(--ink);border-radius:999px;padding:1.5px;box-sizing:border-box;min-width:60px;vertical-align:middle}
+.lbar i{display:block;height:100%;border-radius:999px;background:repeating-linear-gradient(-55deg,var(--ink) 0 4px,transparent 4px 7px);transition:width .3s ease}
+.lbar.big{height:22px;border-width:2.5px;padding:3px;width:100%}
+.lbar.big i{background:repeating-linear-gradient(-55deg,var(--ink) 0 9px,transparent 9px 15px);transition:none}
+.rprog{display:inline-flex;align-items:center;gap:7px;font-size:12px}
+.rprog .lbar{flex:1}
+.rprog b{font-family:var(--f-mono);font-size:11.5px;font-weight:600;min-width:3.2em;text-align:right}
+.pc .rprog{display:flex;margin-top:5px}
+.hero .pg .rprog{flex:1;max-width:320px}
+.hero .pg .rprog .lbar{height:14px}
+table.list .rprog{width:100%;min-width:110px}
+.pgpct{margin-left:10px;font-family:var(--f-mono);font-size:11.5px;color:var(--pmuted);letter-spacing:0}
+/* ---------- 開機畫面 ---------- */
+.boot{position:fixed;inset:0;z-index:200;background:var(--bg);display:grid;place-items:center;transition:opacity .35s ease}
+.boot.out{opacity:0;pointer-events:none}
+.bootin{width:min(440px,86vw);text-align:center}
+.bootlogo{font:600 34px/1 Georgia,serif;display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:26px}
+.bootlogo .d{width:16px;height:16px;border-radius:50%;background:#c2410c}
+.bootload{font-weight:600;font-size:15px;text-align:left;margin:0 0 6px 4px}
+.bootload .dots::after{content:"";animation:dots 1.2s steps(4) infinite}
+@keyframes dots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+.bootpct{font-family:var(--f-mono);font-size:12px;color:var(--muted);text-align:right;margin-top:5px}
+#bootTxt{margin:10px 0 8px;font-size:14px}
+.bootsteps{list-style:none;padding:0;margin:0 auto;text-align:left;display:grid;gap:6px;font-size:13px;color:var(--muted);max-width:380px}
+.bootsteps li{display:flex;gap:8px;align-items:center}
+.bootsteps .ic{width:16px;text-align:center;flex:none;font-weight:700}
+.bootsteps .ok .ic{color:var(--ok)} .bootsteps .warn .ic{color:#c2410c} .bootsteps .bad .ic{color:var(--bad)}
+.bootsteps .small{padding:1px 8px;min-height:0;font-size:12px}
+.bootbtns{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px}
+.bootnotes{text-align:left;font-size:13px;margin-top:10px}.bootnotes ul{margin:6px 0 0;padding-left:20px;max-height:170px;overflow:auto}
+.blockscr{position:fixed;inset:0;z-index:210;background:color-mix(in srgb,var(--bg) 92%,transparent);display:grid;place-items:center;padding:16px}
+.blockcard{max-width:520px;width:100%;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:26px;display:grid;gap:12px;box-shadow:0 20px 60px rgba(0,0,0,.15)}
+.blockcard h2{margin:0;font-size:20px}.blockcard p{margin:0;line-height:1.7}
+@media (prefers-reduced-motion:reduce){.bootload .dots::after{animation:none;content:"..."}}
 </style></head>
 <body>
+<div id="boot" class="boot" role="status" aria-live="polite"><div class="bootin"><div class="bootlogo"><span class="d"></span>Readiverse</div>
+  <div class="bootload">Loading<span class="dots"></span></div><span class="lbar big"><i id="bootBar" style="width:3%"></i></span><div class="bootpct" id="bootPct">0%</div>
+  <p id="bootTxt">載入中…</p><ul class="bootsteps" id="bootSteps"></ul><div id="bootAsk"></div></div></div>
 <div class="top">
   <button type="button" class="brand" id="home" title="回到首頁"><span class="dot"></span>Readiverse</button>
   <nav class="nav" id="nav" aria-label="書庫">
@@ -619,6 +659,9 @@ function pollLib(){ clearTimeout(libPollT); if(LIB.books.some(busy)) libPollT=se
       else { LIB.books.forEach(b=>document.querySelectorAll(`[data-st="${b.id}"]`).forEach(el=>{ const h=aiTag(b); if(el.innerHTML!==h) el.innerHTML=h; })); pollLib(); }
     }catch(e){ pollLib(); } } else pollLib(); },4000); }
 function prog(b){ return b.pages?Math.min(1,(b.lastPage+1)/b.pages):0; }
+const pct=b=>b.status==='done'?100:Math.round(prog(b)*100);
+// 閱讀進度：斜紋進度條＋百分比（樣式跟開機畫面的 Loading 一樣）
+const progBar=(b,cls='')=>`<span class="rprog ${cls}" title="讀到第 ${b.lastPage+1} / ${b.pages} 頁"><span class="lbar"><i style="width:${Math.max(3,pct(b))}%"></i></span><b>${pct(b)}%</b></span>`;
 const byOpened=(a,b)=>(b.opened||b.added)-(a.opened||a.added);
 const SORTS={opened:byOpened,added:(a,b)=>b.added-a.added,title:(a,b)=>a.title.localeCompare(b.title,'zh-Hant'),progress:(a,b)=>prog(b)-prog(a)};
 function inFilter(b,f){ return f==='fav'?b.favorite:f==='reading'?b.status==='reading':f==='done'?b.status==='done':f==='none'?!b.category:f.startsWith('c:')?b.category===f.slice(2):true; }
@@ -637,11 +680,10 @@ function posterCard(b){
   const p=Math.round(prog(b)*100), started=b.opened||b.lastPage;
   return `<div class="pc" role="button" tabindex="0" data-open="${b.id}" draggable="true" data-drag="${b.id}" aria-label="打開 ${esc(b.title)}">
     <div class="po">${designCover(b)}${coverImg(b,1)}${b.favorite?'<span class="fav" aria-label="最愛">★</span>':''}
-      ${started&&b.status!=='done'?`<div class="pb"><i style="width:${p}%"></i></div>`:''}
       <div class="ov"><div class="t">${esc(b.title)}</div><div class="m">${b.pages?`<span>${started?`${b.lastPage+1}/${b.pages} 頁`:`${b.pages} 頁`}</span>`:''}${b.notes?`<span>✎ ${b.notes}</span>`:''}${b.category?`<span>${esc(b.category)}</span>`:''}</div>
         <div class="b"><button type="button" class="go" data-open="${b.id}" title="${started?'繼續閱讀':'開始閱讀'}" aria-label="${started?'繼續閱讀':'開始閱讀'}">${IC.play}</button><button type="button" data-fav="${b.id}" title="${b.favorite?'取消最愛':'加到最愛'}" aria-label="${b.favorite?'取消最愛':'加到最愛'}" style="${b.favorite?'color:#f5b301':''}">${IC.star}</button><button type="button" data-edit="${b.id}" title="詳細資料" aria-label="詳細資料">${IC.more}</button></div></div>
     </div>
-    <div class="nm">${esc(b.title)}</div><div class="sub">${b.author?`<span>${esc(b.author)}</span>`:''}${stTag(b)}</div></div>`; }
+    <div class="nm">${esc(b.title)}</div><div class="sub">${b.author?`<span>${esc(b.author)}</span>`:''}${stTag(b)}</div>${started&&b.pages?progBar(b,'sm'):''}</div>`; }
 function shelf(title,f,L,drop){
   if(!L.length&&!drop) return '';
   return `<section class="shelf"${drop?` data-drop="${esc(f)}"`:''}><div class="hd"><h2>${esc(title)}</h2><span class="cnt">${L.length}</span>${L.length?`<button type="button" class="all" data-f="${esc(f)}">查看全部 ›</button>`:''}</div>
@@ -657,7 +699,7 @@ function heroHtml(){
   return `<div class="hero"><div class="bg" style="${hasCover(b)?`background-image:url('${coverUrl(b)}')`:`background:hsl(${hueOf(b.title)} 55% 55%)`}"></div><div class="in">
     <div class="tx"><span class="kick">${started?'繼續閱讀':'最新加入'}</span><h1>${esc(b.title)}</h1>
       <div class="meta">${b.author?`<span>${esc(b.author)}</span>`:''}${b.category?`<span>${esc(b.category)}</span>`:''}${b.pages?`<span>${b.pages} 頁</span>`:''}${(b.tags||[]).map(t=>`<span>#${esc(t)}</span>`).join('')}${b.notes?`<span>✎ ${b.notes} 則筆記</span>`:''}${stTag(b)}</div>
-      ${started&&b.pages?`<div class="pg"><div class="bar"><i style="width:${Math.round(prog(b)*100)}%"></i></div><span>第 ${b.lastPage+1} / ${b.pages} 頁</span></div>`:''}
+      ${started&&b.pages?`<div class="pg">${progBar(b)}<span>第 ${b.lastPage+1} / ${b.pages} 頁</span></div>`:''}
       <div class="btns"><button type="button" class="primary" data-open="${b.id}">${IC.play}${started?'繼續閱讀':'開始閱讀'}</button><button type="button" class="sec" data-edit="${b.id}">${IC.more}詳細資料</button></div></div>
     <div class="poster" data-open="${b.id}" role="button" tabindex="-1" aria-hidden="true">${designCover(b)}${coverImg(b)}</div></div></div>`; }
 function renderLib(soft){
@@ -701,7 +743,7 @@ function renderLib(soft){
 }
 function listHtml(L){ return `<table class="list"><colgroup><col><col class="hm" style="width:16%"><col style="width:12%"><col class="hm" style="width:9%"><col style="width:9%"><col class="hm" style="width:12%"><col style="width:44px"></colgroup><thead><tr><th>書名</th><th class="hm">作者</th><th>分類</th><th class="hm">狀態</th><th>進度</th><th class="hm">筆記</th><th></th></tr></thead><tbody>${L.map(b=>`<tr class="r" data-open="${b.id}" draggable="true" data-drag="${b.id}">
   <td><span class="lt"><span class="th" style="background:hsl(${hueOf(b.title)} 45% 42%)">${coverImg(b,1)}</span><span><b>${b.favorite?'★ ':''}${esc(b.title)}</b> ${stTag(b)}</span></span></td><td class="hm">${esc(b.author||'—')}</td><td>${b.category?`<span class="pill">${esc(b.category)}</span>`:'<span class="note">—</span>'}</td>
-  <td class="hm">${STATUS[b.status]||''}</td><td class="mono">${b.pages?`${b.lastPage+1}/${b.pages}`:'—'}</td><td class="mono hm">${b.notes||0} 則・${b.marks||0} 處</td>
+  <td class="hm">${STATUS[b.status]||''}</td><td class="mono">${b.pages?((b.opened||b.lastPage)?progBar(b,'sm'):`0/${b.pages}`):'—'}</td><td class="mono hm">${b.notes||0} 則・${b.marks||0} 處</td>
   <td style="width:36px"><button type="button" class="ib ghost" data-edit="${b.id}" title="詳細資料" aria-label="詳細資料 ${esc(b.title)}">${IC.more}</button></td></tr>`).join('')}</tbody></table>`; }
 function arrows(t){ const s=t.parentNode, l=s.querySelector('.arr.l'), r=s.querySelector('.arr.r'); if(!l) return;
   l.disabled=t.scrollLeft<4; r.disabled=t.scrollLeft+t.clientWidth>=t.scrollWidth-4; }
@@ -1183,7 +1225,7 @@ function showSub(){
   const n=nPages(), first=PG<=0&&SUB<=0, last=PG>=n-1&&SUB>=SUBN-1;
   sh.querySelectorAll('[data-turn="-1"]').forEach(b=>b.disabled=first); sh.querySelectorAll('[data-turn="1"]').forEach(b=>b.disabled=last);
   $('prev').disabled=first; $('next').disabled=last;
-  const fo=sh.querySelector('.folio'); if(fo) fo.innerHTML=`— ${PG+1} —${SUBN>1?`<span class="pgsub">${SUB+1}/${SUBN}</span>`:''}`;
+  const fo=sh.querySelector('.folio'); if(fo) fo.innerHTML=`— ${PG+1} —${SUBN>1?`<span class="pgsub">${SUB+1}/${SUBN}</span>`:''}<span class="pgpct">${Math.round((PG+1)/Math.max(1,n)*100)}%</span>`;
   const r=firstShown(); if(r&&BOOK) ANCHOR={book:BOOK.meta.id,pg:PG,i:r.dataset.i||r.dataset.fi};
   if(BOOK) savePos(); }
 function firstShown(){ const u=SUBG[SUB]&&SUBG[SUB][0]; return u&&(u.r||u); }
@@ -1589,6 +1631,69 @@ $('vLib').addEventListener('submit',async e=>{ if(e.target.id!=='dictF') return;
 
 /* ---------- 開始 ---------- */
 loadMarks();
+/* ---------- 開機：每次打開 Readiverse 先檢查（書庫能不能用、別台電腦是不是正在用、Claude 登入、有沒有新版），都好了才進首頁 ---------- */
+let BOOTED=false;
+function bootStep(k,state,txt){ const ul=$('bootSteps'); if(!ul) return; let li=ul.querySelector(`[data-k="${k}"]`); if(!li){ li=document.createElement('li'); li.dataset.k=k; ul.appendChild(li); }
+  li.className=state; li.innerHTML=`<span class="ic">${state==='ok'?'✓':state==='warn'?'!':state==='bad'?'✗':'<span class="spin"></span>'}</span>${txt}`; }
+async function bootRun(){
+  const box=$('boot'); let shown=0, target=8, done=false;
+  const t0=Date.now(), MIN=1800;
+  const tick=()=>{ shown+=(target-shown)*(done?0.16:0.08); if(done&&target>=100&&shown>99.5) shown=100; $('bootBar').style.width=Math.max(3,shown)+'%'; $('bootPct').textContent=Math.round(shown)+'%'; if(shown<100) requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+  try{ if(sessionStorage.getItem('rv.booted')){ box.remove(); try{ const x=await api.get('/api/session'); if(x.state==='blocked'||x.state==='taken') await blockScreen(x,true); }catch(e){} return sessionLoop(); } }catch(e){}
+  // 1. 書庫：能不能讀、別台電腦是不是正在用
+  $('bootTxt').textContent='正在檢查書庫…'; bootStep('lib','run','檢查書庫');
+  let ss; try{ ss=await api.get('/api/session'); }catch(e){ ss={state:'ok'}; }
+  if(ss.state==='blocked'||ss.state==='taken'){ bootStep('lib','bad',`「${esc(ss.other&&ss.other.device||'另一台電腦')}」正在使用這個書庫`); await blockScreen(ss,true); ss=await api.get('/api/session'); }
+  bootStep('lib','ok',`書庫可以用（${ss.cloud?'雲端硬碟，換電腦也是同一份':'這台電腦'}）`); target=35;
+  // 2. Claude 登入（AI 校對、翻譯、問 AI 都要）
+  $('bootTxt').textContent='正在檢查 Claude 登入…'; bootStep('ai','run','檢查 Claude 登入');
+  let au=null; try{ au=await Promise.race([api.get('/api/ai/auth'),new Promise((_,r)=>setTimeout(()=>r(0),15000))]); }catch(e){}
+  if(!au) bootStep('ai','warn','沒辦法檢查 Claude 登入');
+  else if(!au.installed) bootStep('ai','warn','這台電腦沒有 Claude Code：AI 功能（校對、翻譯、問 AI）不能用');
+  else if(!au.loggedIn) bootStep('ai','warn','Claude 還沒登入：AI 功能先不能用 <button type="button" class="small" data-boot-login>登入</button>');
+  else bootStep('ai','ok','Claude 已登入');
+  target=65;
+  // 3. 版本更新（下載安裝的版本才有）
+  $('bootTxt').textContent='正在檢查版本更新…'; bootStep('ver','run','檢查版本更新');
+  let u=null; try{ u=await Promise.race([api.get('/api/update?force=1'),new Promise((_,r)=>setTimeout(()=>r(0),20000))]); }catch(e){}
+  if(u&&u.can&&u.available&&!u.stage){
+    bootStep('ver','warn',`有新版本 ${esc(u.latest)}（目前 ${esc(u.current)}）`); $('bootTxt').textContent='要現在更新嗎？更新好會自動重新打開，書和筆記都不會動到';
+    $('bootAsk').innerHTML=`${u.notes&&u.notes.length?`<details class="bootnotes"><summary>這次更新了什麼</summary><ul>${u.notes.slice(0,20).map(n=>`<li>${esc(n)}</li>`).join('')}</ul></details>`:''}
+      <div class="bootbtns"><button type="button" class="primary" id="bootUpd">現在更新</button><button type="button" id="bootSkip">先不要，用目前版本</button></div>`;
+    const go=await new Promise(res=>{ $('bootUpd').onclick=()=>res(true); $('bootSkip').onclick=()=>res(false); }); $('bootAsk').innerHTML='';
+    if(go){ try{ await api.post('/api/update',{}); }catch(e){}
+      while(true){ let x; try{ x=await api.get('/api/update'); }catch(e){ $('bootTxt').textContent='正在換成新版，馬上自動重新打開…'; target=100; return; }
+        if(x.stage==='install'||x.stage==='restart'){ $('bootTxt').textContent=`新版 ${esc(x.latest)} 下載好了，馬上自動重新打開…`; target=100; return; }
+        if(!x.stage){ bootStep('ver','warn','這次沒更新成功，先用目前的版本'+(x.error?'：'+esc(x.error):'')); break; }
+        $('bootTxt').textContent=`正在下載新版 ${esc(x.latest)}　${x.pct||0}%`; target=65+0.33*(x.pct||0); await new Promise(r=>setTimeout(r,500)); } }
+    else bootStep('ver','warn',`先用目前的版本（之後在設定裡可以更新）`);
+  } else bootStep('ver','ok',!u?'沒辦法檢查新版（沒有網路？）':u.can?`已經是最新版本 ${esc(u.current)}`:`版本 ${esc(u.current||'開發版')}`);
+  target=100; done=true; $('bootTxt').textContent='準備好了';
+  await new Promise(r=>setTimeout(r,Math.max(0,MIN-(Date.now()-t0))));
+  await new Promise(r=>{ const w=()=>shown>=99.5?setTimeout(r,450):requestAnimationFrame(w); w(); });     // 進度條跑滿 100% 才進首頁
+  try{ sessionStorage.setItem('rv.booted','1'); }catch(e){}
+  box.classList.add('out'); setTimeout(()=>box.remove(),400); BOOTED=true; sessionLoop(); }
+document.addEventListener('click',e=>{ if(e.target.closest('[data-boot-login]')){ const b=$('boot'); if(b){ b.classList.add('out'); setTimeout(()=>b.remove(),300); } try{ sessionStorage.setItem('rv.booted','1'); }catch(err){} sessionLoop(); openSettings(); } });
+// 別台電腦正在用（或強制接手了）：擋住畫面，等那台關掉（每 10 秒自動檢查），也可以強制在這台用
+function blockScreen(ss,atBoot){ return new Promise(res=>{
+  let d=$('blockScr'); if(!d){ d=document.createElement('div'); d.id='blockScr'; d.className='blockscr'; document.body.appendChild(d); }
+  const who=esc(ss.other&&ss.other.device||'另一台電腦'), ago=ss.other&&ss.other.t?Math.round((Date.now()-ss.other.t)/60000):-1;
+  d.innerHTML=`<div class="blockcard"><h2>${ss.state==='taken'?`「${who}」接手了這個書庫`:`「${who}」正在使用 Readiverse`}</h2>
+    <p>${ss.state==='taken'?'那台電腦選了「強制在那台使用」，這台先停下來（不會再改書庫），你在這台的筆記都已經存好了。':`${ago<0?'':ago<1?'那台剛剛還開著。':`那台 ${ago} 分鐘前還開著。`}書和筆記放在雲端，一次只能在一台電腦用，兩台的筆記才不會互相蓋掉。<br>請到那台關掉 Readiverse，這裡會自動接著打開。`}</p>
+    <div class="note"><span class="spin"></span>等待中，每 10 秒自動檢查</div>
+    <div class="bootbtns"><button type="button" class="primary" data-blk="re">重新檢查</button><button type="button" data-blk="quit">關閉 Readiverse</button></div>
+    <details><summary class="note">那台沒在用（忘了關、當機、不在身邊）？</summary><button type="button" class="small" data-blk="force" style="margin-top:8px">強制在這台使用</button></details></div>`;
+  const fin=()=>{ clearInterval(iv); d.remove(); res(); };
+  const check=async force=>{ let x; try{ x=await api.post('/api/session',force?{force:true}:{}); }catch(e){ return; } if(x.state==='ok'){ fin(); if(!atBoot) location.reload(); } };
+  const iv=setInterval(()=>check(false),10000);
+  d.onclick=async e=>{ const b=e.target.closest('[data-blk]'); if(!b) return; const a=b.dataset.blk;
+    if(a==='re'){ b.disabled=true; b.textContent='檢查中…'; await check(false); b.disabled=false; b.textContent='重新檢查'; }
+    if(a==='force'&&confirm(`在這台電腦繼續使用？\n\n「${who}」會停下來（它已經存好的筆記不會不見）。只有確定那台沒在用時才這樣做。`)) check(true);
+    if(a==='quit'){ try{ await api.post('/api/session',{quit:true}); }catch(err){} d.innerHTML='<div class="blockcard"><p>Readiverse 已關閉，可以關掉這個視窗。</p></div>'; } }; }); }
+// 開著的時候：每分鐘看一次是不是被別台接手了
+let SLT=null; function sessionLoop(){ clearInterval(SLT); SLT=setInterval(async()=>{ let x; try{ x=await api.get('/api/session'); }catch(e){ return; } if(x.state==='taken'||x.state==='blocked'){ clearInterval(SLT); if(BOOK) flushSave(); blockScreen(x,false); } },60000); }
+bootRun();
 loadLib().then(()=>{ const m=location.hash.match(/book=([a-z0-9]+)/); if(m&&LIB.books.some(b=>b.id===m[1])) openBook(m[1]); }).catch(e=>{ $('vLib').innerHTML=`<div class="empty" style="margin-top:40px"><b>連不到 Readiverse 伺服器</b><span class="note">請用「開啟Readiverse.command」打開。${esc(e.message)}</span></div>`; });
 </script>
 </body></html>

@@ -660,6 +660,8 @@ def read_page_ai(bid, pno, imgdir, kind='fast'):
     if r.returncode != 0 or not m:
         err = ((r.stderr or r.stdout or '').strip().splitlines() or ['沒有回應'])[-1][:200]
         if re.search(r'auth|login|expired', err, re.I): raise RuntimeError('Claude 沒有登入：' + err)
+        if re.search(r'content filtering|blocked', err, re.I):              # AI 不肯照抄這一頁（有版權的內容會被擋）：記下來，不要每次都重試
+            return {'ok': False, 'blocked': True, 'error': err, 't': int(time.time())}
         return {'ok': False, 'error': err}
     try: paras = [str(x).strip() for x in (json.loads(m.group(0)).get('paras') or []) if str(x).strip()]
     except (ValueError, AttributeError): return {'ok': False, 'error': 'AI 回傳的格式不對'}
@@ -776,6 +778,8 @@ def proof_page(bid, pno, imgdir, kind='best'):
     if r.returncode != 0 or not m:
         err = ((r.stderr or r.stdout or '').strip().splitlines() or ['沒有回應'])[-1][:200]
         if re.search(r'auth|login|expired', err, re.I): raise RuntimeError('Claude 沒有登入：' + err)
+        if re.search(r'content filtering|blocked', err, re.I):              # AI 不肯照抄這一頁（有版權的內容會被擋）：記下來，不要每次都重試
+            return {'ok': False, 'blocked': True, 'error': err, 't': int(time.time())}
         return {'ok': False, 'error': err}
     try: j = json.loads(m.group(0))
     except ValueError: return {'ok': False, 'error': 'AI 回傳的格式不對'}

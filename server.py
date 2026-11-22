@@ -1121,6 +1121,33 @@ def split_by_raw(pages, raw, i, frozen=()):
 
 
 
+
+def is_heading(t):
+    """像章名、小標題：很短、不是句子（沒有句尾標點）、大寫開頭"""
+    t = _sq(t)
+    if not t or len(t) > 70 or len(_wds(t)) > 10: return False
+    if re.search(r'[.!?,;:]["”’\')]*$', t) or not re.match(r'[A-Z0-9(]', t): return False      # 句子、對話（引號開頭）都不是標題
+    return sum(c.isalpha() for c in t) >= 0.6 * len(t.replace(' ', ''))
+
+
+def move_trailing_headings(pages, frozen=()):
+    """標題剛好在一頁的最後（內文在下一頁）：標題搬到下一頁開頭，跟它的內文在一起。回傳搬了幾個"""
+    n = 0
+    for i in range(len(pages) - 1):
+        if i in frozen or (i + 1) in frozen: continue
+        pg = pages[i]
+        k = len(pg)
+        while k > 0 and is_text(pg[k - 1]) and is_heading(pg[k - 1]): k -= 1
+        tail = pg[k:]
+        if not tail or k == 0: continue                     # 整頁都是標題（章節頁）：不動
+        nxt = pages[i + 1]
+        first = next((x for x in nxt if is_text(x)), '')
+        if not first or is_heading(first) or len(_wds(first)) < 8: continue          # 下一頁開頭不是內文（目錄、版權頁、章節頁）：不搬
+        if not any(is_text(x) and not is_heading(x) and len(_wds(x)) >= 8 for x in pg[:k]): continue   # 這一頁沒有內文（目錄頁）：不搬
+        pages[i] = pg[:k]; pages[i + 1] = tail + nxt; n += len(tail)
+    return n
+
+
 def dedupe_page(items):
     """同一頁裡一模一樣的段落只留第一個（分段、跨頁搬動之後可能出現兩份）"""
     seen, out = set(), []
@@ -1229,6 +1256,7 @@ def parse_job(bid):
                             nb = [x for q in (k - 1, k + 1) if 0 <= q < len(pages) for x in pages[q]]
                             if k < len(raw): pages[k], _ = restore_headings(pages[k], raw[k], nb, raw_rep6)
                             pages[k] = dedupe_page(pages[k])
+                    move_trailing_headings(pages, frozen)              # 頁尾的標題：跟下一頁的內文放在一起
                     write_json(pf, pages)
                 update_book(bid, parse={'status': 'running', 'next': j['to'], 'total': total, 'rev': int(time.time() * 1000)},
                             hasText=True if got else b.get('hasText'))

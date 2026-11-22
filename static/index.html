@@ -529,6 +529,7 @@ $('themeBtn').onclick=()=>setTheme(isDark()?'light':'dark');
    ===================================================================== */
 let LIB={books:[],categories:[]}, FILTER=LS.get('filter2','home'), VIEW=LS.get('view2','grid'), SORT=LS.get('sort','opened');
 async function loadLib(){ await loadCaps(); LIB=await api.get('/api/library'); renderLib(); }
+const stTag=b=>`<span data-st="${b.id}">${aiTag(b)}</span>`;   // 背景處理的進度：只更新這一小塊，首頁不用整個重畫
 function aiTag(b){ const a=b.ai||{}, r=b.parse||{}, sp='<span class="spin"></span>';
   if(r.status==='running') return `<span class="aist" title="Docling 在背景解析版面：分段、圖片、表格">${sp}版面解析中${r.total?` ${Math.min(r.next||0,r.total)}/${r.total} 頁`:''}</span>`;
   if(r.status==='queued') return `<span class="aist">${sp}${CAPS.docling&&CAPS.docling.status==='installing'?'等 Docling 安裝好':'等待版面解析'}</span>`;
@@ -541,7 +542,12 @@ function aiTag(b){ const a=b.ai||{}, r=b.parse||{}, sp='<span class="spin"></spa
 const busy=b=>['running','queued'].includes((b.ai||{}).status)||['running','queued'].includes((b.parse||{}).status)||(b.fix||{}).status==='running'||['running','queued'].includes((b.proof||{}).status);
 let CAPS={}; async function loadCaps(){ try{ CAPS=await api.get('/api/caps'); }catch(e){} }
 let libPollT=null;
-function pollLib(){ clearTimeout(libPollT); if(LIB.books.some(busy)) libPollT=setTimeout(async()=>{ if(!$('vLib').hidden){ try{ await loadCaps(); LIB=await api.get('/api/library'); renderLib(true); }catch(e){} } else pollLib(); },4000); }
+// 首頁會變的東西（書名、作者、封面、分類…）；進度數字不算
+const libSig=L=>JSON.stringify([L.categories,(L.profile||{}).name,L.books.map(b=>[b.id,b.title,b.author,b.category,b.tags,b.cover,b.coverV,b.favorite,b.status,b.lastPage,b.notes,b.marks,(b.parse||{}).status,(b.proof||{}).status,(b.ai||{}).status])]);
+function pollLib(){ clearTimeout(libPollT); if(LIB.books.some(busy)) libPollT=setTimeout(async()=>{ if(!$('vLib').hidden){ try{ await loadCaps(); const before=libSig(LIB); LIB=await api.get('/api/library');
+      if(libSig(LIB)!==before) renderLib(true);                           // 真的有東西變了才重畫
+      else { LIB.books.forEach(b=>document.querySelectorAll(`[data-st="${b.id}"]`).forEach(el=>{ const h=aiTag(b); if(el.innerHTML!==h) el.innerHTML=h; })); pollLib(); }
+    }catch(e){ pollLib(); } } else pollLib(); },4000); }
 function prog(b){ return b.pages?Math.min(1,(b.lastPage+1)/b.pages):0; }
 const byOpened=(a,b)=>(b.opened||b.added)-(a.opened||a.added);
 const SORTS={opened:byOpened,added:(a,b)=>b.added-a.added,title:(a,b)=>a.title.localeCompare(b.title,'zh-Hant'),progress:(a,b)=>prog(b)-prog(a)};
@@ -565,7 +571,7 @@ function posterCard(b){
       <div class="ov"><div class="t">${esc(b.title)}</div><div class="m">${b.pages?`<span>${started?`${b.lastPage+1}/${b.pages} 頁`:`${b.pages} 頁`}</span>`:''}${b.notes?`<span>✎ ${b.notes}</span>`:''}${b.category?`<span>${esc(b.category)}</span>`:''}</div>
         <div class="b"><button type="button" class="go" data-open="${b.id}" title="${started?'繼續閱讀':'開始閱讀'}" aria-label="${started?'繼續閱讀':'開始閱讀'}">${IC.play}</button><button type="button" data-fav="${b.id}" title="${b.favorite?'取消最愛':'加到最愛'}" aria-label="${b.favorite?'取消最愛':'加到最愛'}" style="${b.favorite?'color:#f5b301':''}">${IC.star}</button><button type="button" data-edit="${b.id}" title="詳細資料" aria-label="詳細資料">${IC.more}</button></div></div>
     </div>
-    <div class="nm">${esc(b.title)}</div><div class="sub">${b.author?`<span>${esc(b.author)}</span>`:''}${aiTag(b)}</div></div>`; }
+    <div class="nm">${esc(b.title)}</div><div class="sub">${b.author?`<span>${esc(b.author)}</span>`:''}${stTag(b)}</div></div>`; }
 function shelf(title,f,L,drop){
   if(!L.length&&!drop) return '';
   return `<section class="shelf"${drop?` data-drop="${esc(f)}"`:''}><div class="hd"><h2>${esc(title)}</h2><span class="cnt">${L.length}</span>${L.length?`<button type="button" class="all" data-f="${esc(f)}">查看全部 ›</button>`:''}</div>
@@ -580,7 +586,7 @@ function heroHtml(){
   const b=B.filter(x=>x.opened&&x.status!=='done').sort(byOpened)[0]||B.slice().sort((x,y)=>y.added-x.added)[0], started=b.opened||b.lastPage;
   return `<div class="hero"><div class="bg" style="${hasCover(b)?`background-image:url('${coverUrl(b)}')`:`background:hsl(${hueOf(b.title)} 55% 55%)`}"></div><div class="in">
     <div class="tx"><span class="kick">${started?'繼續閱讀':'最新加入'}</span><h1>${esc(b.title)}</h1>
-      <div class="meta">${b.author?`<span>${esc(b.author)}</span>`:''}${b.category?`<span>${esc(b.category)}</span>`:''}${b.pages?`<span>${b.pages} 頁</span>`:''}${(b.tags||[]).map(t=>`<span>#${esc(t)}</span>`).join('')}${b.notes?`<span>✎ ${b.notes} 則筆記</span>`:''}${aiTag(b)}</div>
+      <div class="meta">${b.author?`<span>${esc(b.author)}</span>`:''}${b.category?`<span>${esc(b.category)}</span>`:''}${b.pages?`<span>${b.pages} 頁</span>`:''}${(b.tags||[]).map(t=>`<span>#${esc(t)}</span>`).join('')}${b.notes?`<span>✎ ${b.notes} 則筆記</span>`:''}${stTag(b)}</div>
       ${started&&b.pages?`<div class="pg"><div class="bar"><i style="width:${Math.round(prog(b)*100)}%"></i></div><span>第 ${b.lastPage+1} / ${b.pages} 頁</span></div>`:''}
       <div class="btns"><button type="button" class="primary" data-open="${b.id}">${IC.play}${started?'繼續閱讀':'開始閱讀'}</button><button type="button" class="sec" data-edit="${b.id}">${IC.more}詳細資料</button></div></div>
     <div class="poster" data-open="${b.id}" role="button" tabindex="-1" aria-hidden="true">${designCover(b)}${coverImg(b)}</div></div></div>`; }
@@ -623,7 +629,7 @@ function renderLib(soft){
   el.querySelectorAll('.track').forEach(arrows);
 }
 function listHtml(L){ return `<table class="list"><colgroup><col><col class="hm" style="width:16%"><col style="width:12%"><col class="hm" style="width:9%"><col style="width:9%"><col class="hm" style="width:12%"><col style="width:44px"></colgroup><thead><tr><th>書名</th><th class="hm">作者</th><th>分類</th><th class="hm">狀態</th><th>進度</th><th class="hm">筆記</th><th></th></tr></thead><tbody>${L.map(b=>`<tr class="r" data-open="${b.id}" draggable="true" data-drag="${b.id}">
-  <td><span class="lt"><span class="th" style="background:hsl(${hueOf(b.title)} 45% 42%)">${coverImg(b,1)}</span><span><b>${b.favorite?'★ ':''}${esc(b.title)}</b> ${aiTag(b)}</span></span></td><td class="hm">${esc(b.author||'—')}</td><td>${b.category?`<span class="pill">${esc(b.category)}</span>`:'<span class="note">—</span>'}</td>
+  <td><span class="lt"><span class="th" style="background:hsl(${hueOf(b.title)} 45% 42%)">${coverImg(b,1)}</span><span><b>${b.favorite?'★ ':''}${esc(b.title)}</b> ${stTag(b)}</span></span></td><td class="hm">${esc(b.author||'—')}</td><td>${b.category?`<span class="pill">${esc(b.category)}</span>`:'<span class="note">—</span>'}</td>
   <td class="hm">${STATUS[b.status]||''}</td><td class="mono">${b.pages?`${b.lastPage+1}/${b.pages}`:'—'}</td><td class="mono hm">${b.notes||0} 則・${b.marks||0} 處</td>
   <td style="width:36px"><button type="button" class="ib ghost" data-edit="${b.id}" title="詳細資料" aria-label="詳細資料 ${esc(b.title)}">${IC.more}</button></td></tr>`).join('')}</tbody></table>`; }
 function arrows(t){ const s=t.parentNode, l=s.querySelector('.arr.l'), r=s.querySelector('.arr.r'); if(!l) return;

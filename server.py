@@ -155,7 +155,7 @@ def update_book(bid, **kw):
         b.update(kw); save_index(ix); return b
 
 
-META_KEYS = ('title', 'author', 'category', 'tags', 'status', 'lastPage', 'pages', 'favorite', 'hasText')
+META_KEYS = ('title', 'author', 'category', 'tags', 'status', 'lastPage', 'lastPara', 'pages', 'favorite', 'hasText')
 
 
 def clean_meta(d):
@@ -165,7 +165,7 @@ def clean_meta(d):
         v = d[k]
         if k in ('title', 'author', 'category', 'status'): v = str(v or '').strip()[:300]
         elif k == 'tags': v = [str(t).strip()[:40] for t in (v or []) if str(t).strip()][:20]
-        elif k in ('lastPage', 'pages'): v = max(0, int(v or 0))
+        elif k in ('lastPage', 'lastPara', 'pages'): v = max(0, int(v or 0))
         else: v = bool(v)
         out[k] = v
     return out

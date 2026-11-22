@@ -366,9 +366,9 @@ table.vt .fg{font-family:var(--f-mono);font-size:12px;text-align:center}
 .pcard.err{border-left-color:var(--bad)} .pcard.run{border-left-color:var(--line)}
 .morebtn{display:block;margin:20px auto 0}
 /* ---------- 像在讀書：紙、首行縮排、左右對齊、章名、首字放大、書眉、頁碼 ---------- */
-:root{--paper:#fbf7ef;--pink:#2b2722;--pmuted:#8b8174;--pline:#e9e1d3}
-:root[data-theme="dark"]{--paper:#17140f;--pink:#e9e2d4;--pmuted:#8f8677;--pline:#2c271f}
-@media (prefers-color-scheme:dark){:root[data-theme="system"]{--paper:#17140f;--pink:#e9e2d4;--pmuted:#8f8677;--pline:#2c271f}}
+:root{--paper:#ffffff;--pink:#111111;--pmuted:#6b6b6b;--pline:#e2e2e2}
+:root[data-theme="dark"]{--paper:#000000;--pink:#f2f2f2;--pmuted:#9a9a9a;--pline:#2a2a2a}
+@media (prefers-color-scheme:dark){:root[data-theme="system"]{--paper:#000000;--pink:#f2f2f2;--pmuted:#9a9a9a;--pline:#2a2a2a}}
 #rs{background:var(--paper)}
 #vRead .rbar{background:var(--paper);border-bottom-color:var(--pline)}
 .sheet .gut::after{background:var(--pline)}
@@ -758,6 +758,7 @@ async function openBook(id){
   $('pgN').textContent=n; $('pgIn').max=n; $('tocBtn').hidden=true; $('toc').hidden=true; $('allPane').hidden=true;
   if(!BOOK.meta.hasText&&MODE==='text') MODE='pdf';
   history.replaceState(null,'','#book='+id);
+  RESTORE=BOOK.meta.lastPara!=null&&PG===(BOOK.meta.lastPage||0)?BOOK.meta.lastPara:null;
   loadPdf(); showPage(PG,0); readerAi();
 }
 let rdPollT=null;
@@ -796,7 +797,7 @@ function showPage(p,dir){
   if(MODE==='text') renderPage(); else renderPdfPage();
   hidePop();
   if(changed){ $('rs').scrollTop=0; const sh=$('sheet'); sh.classList.remove('tn','tp'); if(dir){ void sh.offsetWidth; sh.classList.add(dir>0?'tn':'tp'); }
-    clearTimeout(pgT); pgT=setTimeout(()=>{ if(BOOK) api.patch(`/api/books/${BOOK.meta.id}`,{lastPage:PG}).then(b=>{ if(BOOK&&BOOK.meta.id===b.id) BOOK.meta=b; }).catch(()=>{}); },500); }
+    savePos(); }
   if(!$('allPane').hidden) renderAll();
   if(ZH&&MODE==='text'&&BOOK.meta.hasText) ensureZh(PG).then(()=>ensureZh(PG+1)).catch(()=>{});
 }
@@ -901,7 +902,10 @@ async function aiPage(p){ const id=BOOK.meta.id; AIPG[p]=1; delete AIPG_ERR[p]; 
   try{ const j=await api.post(`/api/books/${id}/ai-page`,{page:p}); if(BOOK&&BOOK.meta.id===id){ BOOK.pages[p]=j.page; if(j.ocrBad) BOOK.meta.ocrBad=j.ocrBad; toast('這一頁整理好了'); } }
   catch(e){ AIPG_ERR[p]=e.message; } finally{ delete AIPG[p]; if(BOOK&&BOOK.meta.id===id&&p===PG&&MODE==='text') renderPage(); } }
 /* ---------- 一頁一個畫面：放不下的段落移到下一個畫面（不用上下捲動） ---------- */
-let SUB=0, SUBN=1, SUB_END=false, SUBG=[];
+let SUB=0, SUBN=1, SUB_END=false, SUBG=[], RESTORE=null;
+// 記住看到哪裡：第幾頁＋這個畫面的第一段（關掉 App 再打開也會回到這裡）
+function savePos(){ clearTimeout(pgT); pgT=setTimeout(()=>{ if(!BOOK) return; const r=firstShown(), para=r?+(r.dataset.i||r.dataset.fi||0):0;
+  api.patch(`/api/books/${BOOK.meta.id}`,{lastPage:PG,lastPara:para}).then(b=>{ if(BOOK&&BOOK.meta.id===b.id) Object.assign(BOOK.meta,b); }).catch(()=>{}); },500); }
 function paginate(keep){
   const sh=$('sheet'), rs=$('rs'); if(MODE!=='text'||!sh||sh.hidden) return;
   const rows=[...sh.querySelectorAll(':scope>.rc')]; rows.forEach(r=>r.classList.remove('off'));
@@ -913,8 +917,10 @@ function paginate(keep){
   SUBG=G; SUBN=G.length;
   if(keep){ const k=G.findIndex(g=>g.includes(keep)); if(k>=0) SUB=k; }
   if(SUB_END){ SUB=SUBN-1; SUB_END=false; }
+  if(keep===undefined&&RESTORE!=null){ const k=G.findIndex(g=>g.some(r=>(r.dataset.i||r.dataset.fi)==RESTORE)); if(k>=0) SUB=k; RESTORE=null; }
   SUB=Math.max(0,Math.min(SUBN-1,SUB));
   G.forEach((g,k)=>g.forEach(r=>r.classList.toggle('off',k!==SUB)));
+  if(BOOK&&!keep) savePos();
   rs.classList.toggle('tall',G[SUB].reduce((a,r)=>a+r.offsetHeight,0)>avail+4); rs.scrollTop=0;   // 只有一段長到放不下整個畫面時才可以捲
   const n=nPages(), first=PG<=0&&SUB<=0, last=PG>=n-1&&SUB>=SUBN-1;
   sh.querySelectorAll('[data-turn="-1"]').forEach(b=>b.disabled=first); sh.querySelectorAll('[data-turn="1"]').forEach(b=>b.disabled=last);
@@ -1005,7 +1011,7 @@ $('sheet').addEventListener('click',e=>{
   const sel=getSelection(); if(sel&&!sel.isCollapsed) return;
   const ul=t.closest('.vw,.ph');
   if(ul){ const rc=ul.getBoundingClientRect(), pi=+ul.closest('.ptx').dataset.k, ctx=sentenceAt(paras(PG)[pi],0,ul.textContent);
-    if(ul.classList.contains('ph')){ const o=PHRM[+ul.dataset.ph]; if(o) return phCard(o.x,rc); }
+    if(ul.classList.contains('ph')){ const o=PHRM[+ul.dataset.ph]; if(o) return phCard(o.x,rc,ul.closest('.ptx')?[...ul.closest('.ptx').querySelectorAll(`.ph[data-ph="${ul.dataset.ph}"]`)].map(e=>e.textContent).join(''):''); }
     else { const v=VOCM[+ul.dataset.vw]; if(v){ v._ctx=ctx; return vwCard(v,rc); } } }
   const mk=t.closest('mark.hl'); if(!mk) return; const i=+mk.closest('.ptx').dataset.k;
   const o=segsOfMark(i,+mk.dataset.s); if(!o) return; const rc=mk.getBoundingClientRect();
@@ -1169,20 +1175,23 @@ async function vwCard(v,rc){ hideCard(); const d=document.createElement('div'); 
     if(q('[data-yes]')) q('[data-yes]').onclick=async()=>{ await api.post('/api/vocab/del',{k:v.k}); hideCard(); toast('已移除'); await loadMarks(); if(!$('vLib').hidden) renderLib(true); }; };
   draw(); placeCard(d,rc);
   if(!r||!r.en){ try{ r=await api.get('/api/meaning?w='+encodeURIComponent(v.w)); }catch(e){} if(WCARD===d) draw(); } }
-function phCard(x,rc){ hideCard(); const d=document.createElement('div'); d.className='wcard'; d.setAttribute('role','dialog'); let conf=false;
+function phCard(x,rc,span){ hideCard(); const d=document.createElement('div'); d.className='wcard'; d.setAttribute('role','dialog'); let conf=false;
+  // 這段底線對到的所有收藏（同一個句型可能收藏過好幾次）：刪的時候一起刪，底線才會真的消失
+  const same=span?PHRM.filter(o=>{ o.re.lastIndex=0; const m=o.re.exec(span); return m&&m.index===0&&m[0].length===span.length; }).map(o=>o.x.id):[];
+  const ids=[...new Set([x.id,...same])];
   const draw=()=>{ const ex=(x.examples||[])[0];
     d.innerHTML=`<div class="hd"><span class="key">${esc(x.key||x.text)}</span><span class="grow"></span><span class="tag phc">✦ 我的句子</span></div>
     ${x.zh?`<div class="zhm">${esc(x.zh)}</div>`:''}${x.pattern&&x.pattern!==x.key?`<div><div class="lab">句型</div><div style="color:var(--ph);font-family:var(--f-mono);font-size:13px">${esc(x.pattern)}</div></div>`:''}
     ${x.note?`<div class="note">${esc(x.note)}</div>`:''}${ex?`<div><div class="lab">例句</div><div class="exs"><div>${bold2(ex.en||'')}<small>${bold2(ex.zh||'')}</small></div></div></div>`:''}
     ${x.text&&x.text!==x.key?`<div><div class="lab">收藏的原句</div><div class="ctx">${esc(x.text)}</div></div>`:''}
     <div class="note">${x.title?`收藏自〈${esc(x.title)}〉`:''}${(x.more||[]).length?`・另外在 ${x.more.length} 個地方也收藏過`:''}</div>
-    <div class="acts">${conf?`<span class="note">確定移除這個句型？</span><button type="button" class="small" data-no>取消</button><button type="button" class="small danger" data-yes>移除</button>`:
+    <div class="acts">${conf?`<span class="note">${ids.length>1?`這個句型收藏了 ${ids.length} 筆，會一起移除。確定？`:'確定移除這個句型？'}</span><button type="button" class="small" data-no>取消</button><button type="button" class="small danger" data-yes>移除</button>`:
       `<button type="button" class="small" data-say>${ICSAY.replace('class="i"','class="i" style="display:inline-block;vertical-align:-3px;width:14px;height:14px"')} 唸一次</button><span class="grow"></span><button type="button" class="ib ghost" data-del title="移除收藏" aria-label="移除收藏">${ICTRASH}</button>`}</div>`;
     const q=s=>d.querySelector(s);
     if(q('[data-say]')) q('[data-say]').onclick=()=>sayTTS(x.key||x.text);
     if(q('[data-del]')) q('[data-del]').onclick=()=>{ conf=true; draw(); };
     if(q('[data-no]')) q('[data-no]').onclick=()=>{ conf=false; draw(); };
-    if(q('[data-yes]')) q('[data-yes]').onclick=async()=>{ await api.post('/api/phrase/del',{id:x.id}); hideCard(); toast('已移除'); await loadMarks(); if(!$('vLib').hidden) renderLib(true); }; };
+    if(q('[data-yes]')) q('[data-yes]').onclick=async()=>{ try{ for(const id of ids) await api.post('/api/phrase/del',{id}); }catch(e){ return toast('移除失敗：'+esc(e.message),5000); } hideCard(); toast(ids.length>1?`已移除 ${ids.length} 筆`:'已移除'); await loadMarks(); if(!$('vLib').hidden) renderLib(true); }; };
   draw(); placeCard(d,rc); }
 
 /* ---------- 字典頁、句子收藏頁 ---------- */

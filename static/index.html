@@ -219,14 +219,14 @@ dialog h2{font-family:var(--f-zh);font-size:17px;margin:0 0 14px}
 .pgsep{font-family:var(--f-mono);font-size:11px;color:var(--muted);letter-spacing:.06em}
 .rhead textarea{min-height:34px;font-size:13px;padding:5px 10px;border-color:transparent;background:var(--soft);resize:none}
 .rhead textarea:focus{border-color:var(--line);background:var(--bg)}
-.para{display:grid;grid-template-columns:26px minmax(0,1fr);gap:6px;border-radius:6px;transition:background .15s;max-width:860px;margin-left:auto;margin-right:auto}
+.para{display:block;border-radius:6px;transition:background .15s;max-width:860px;margin-left:auto;margin-right:auto}
 .r2{padding:6px 0}
 .para .no{font-family:var(--f-mono);font-size:11px;color:var(--muted);padding-top:.45em;text-align:right;user-select:none}
 .ptx{font-family:var(--f-read);font-size:var(--fs);line-height:1.75;hyphens:auto}
 
 .para.flash{animation:fl 1s}
 @keyframes fl{0%,40%{background:color-mix(in srgb,var(--ink) 14%,transparent)}100%{background:transparent}}
-.zh{grid-column:2;font-family:var(--f-zh);font-size:calc(var(--fs) - 3px);line-height:1.8;color:var(--muted);border-left:2px solid var(--line);padding:2px 0 2px 10px;margin:6px 0 4px;outline:none;border-radius:0 4px 4px 0}
+.zh{font-family:var(--f-zh);font-size:calc(var(--fs) - 3px);line-height:1.8;color:var(--muted);border-left:2px solid var(--line);padding:2px 0 2px 10px;margin:6px 0 4px;outline:none;border-radius:0 4px 4px 0}
 .zh:focus{background:var(--soft);color:var(--ink)}
 .zh.wait{font-style:italic}
 mark.hl{color:inherit;border-radius:2px;padding:0 1px;cursor:pointer}
@@ -241,7 +241,7 @@ mark.hl.lit{box-shadow:0 0 0 2px var(--ink)}
 .addn{align-self:flex-start;opacity:0;transition:opacity .12s;border:1px dashed var(--line);background:none;color:var(--muted);font-size:12px;min-height:26px;padding:2px 9px}
 .r2.hov .addn,.addn:focus-visible{opacity:1}
 @media (hover:none){.addn{opacity:.7}}
-.fig{margin:10px auto 14px;max-width:860px;padding-left:32px;display:flex;flex-direction:column;gap:6px}
+.fig{margin:10px auto 14px;max-width:860px;display:flex;flex-direction:column;gap:6px}
 .fig img{max-width:100%;max-height:calc(100vh - 300px);width:auto;height:auto;object-fit:contain;align-self:center;border-radius:6px;cursor:zoom-in;background:#fff;border:1px solid var(--line)}
 .fig figcaption{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;justify-content:center;text-align:center}
 .tblw{overflow-x:auto}
@@ -257,7 +257,7 @@ mark.hl.lit{box-shadow:0 0 0 2px var(--ink)}
 .notext{border:1.5px dashed var(--line);border-radius:12px;padding:28px;text-align:center;color:var(--muted)}
 #pdfView{display:flex;justify-content:center;padding:22px 12px 40px}
 #pdfView canvas{max-width:100%;height:auto;border:1px solid var(--line);box-shadow:0 2px 10px rgba(0,0,0,.06)}
-.rfoot{display:flex;align-items:center;gap:14px;max-width:860px;margin:10px auto 0;padding:12px 0 0 32px;border-top:1px solid var(--line)}
+.rfoot{display:flex;align-items:center;gap:14px;max-width:860px;margin:10px auto 0;padding:12px 0 0;border-top:1px solid var(--line)}
 .ptop{display:flex;align-items:center;gap:6px;max-width:860px;margin:0 auto;width:100%}
 .pgbtn{display:inline-flex;align-items:center;gap:4px;min-height:32px;padding:4px 10px 4px 8px;font-size:13px;border-radius:999px}
 .pgbtn[data-turn="1"]{padding:4px 8px 4px 12px}
@@ -277,7 +277,7 @@ mark.hl.lit{box-shadow:0 0 0 2px var(--ink)}
 .hcard .x:hover{color:var(--bad)}
 .hc0{--hc:var(--ink)} .hc1{--hc:var(--h1)} .hc2{--hc:var(--h2)} .hc3{--hc:var(--h3)} .hc4{--hc:var(--h4)}
 .hcard.focus,.hcard.lit{border-color:var(--ink)}
-@media (max-width:860px){.r2{grid-template-columns:minmax(0,1fr)} .r2>.L{padding:0} .r2>.R{padding:6px 0 0 32px} .r2>.R:empty{display:none} .gut{display:none} .addn{opacity:.7}}
+@media (max-width:860px){.r2{grid-template-columns:minmax(0,1fr)} .r2>.L{padding:0} .r2>.R{padding:6px 0 0} .r2>.R:empty{display:none} .gut{display:none} .addn{opacity:.7}}
 #allPane{position:fixed;top:56px;right:0;bottom:0;width:min(440px,100vw);background:var(--bg);border-left:1px solid var(--ink);z-index:20;display:flex;flex-direction:column;box-shadow:-8px 0 24px rgba(0,0,0,.12)}
 #allPane .hd{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)}
 #allPane .bd{overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
@@ -306,12 +306,12 @@ mark.hl.lit{box-shadow:0 0 0 2px var(--ink)}
 @media (prefers-color-scheme:dark){:root[data-theme="system"]{--vw:#4fd1bd;--ph:#a99cff}}
 .vw{text-decoration:underline;text-decoration-color:var(--vw);text-decoration-thickness:2.5px;text-underline-offset:5px;text-decoration-skip-ink:none;cursor:pointer}
 .vw{white-space:nowrap}
-.vw.last::after{content:"◆";display:inline-block;text-decoration:none;font-size:.45em;color:var(--vw);vertical-align:super;margin-left:2px;font-family:sans-serif}
+.vw.last::after{content:"◆";display:inline-block;text-indent:0;text-decoration:none;font-size:.45em;color:var(--vw);vertical-align:super;margin-left:2px;font-family:sans-serif}
 .vw:hover{background:color-mix(in srgb,var(--vw) 12%,transparent);border-radius:3px}
 .ph{text-decoration:underline;text-decoration-skip-ink:none;text-decoration-color:var(--ph);text-decoration-thickness:2.5px;text-underline-offset:4px;cursor:pointer}
-.ph.last::after{content:"✦";display:inline-block;text-decoration:none;font-size:.62em;color:var(--ph);vertical-align:super;margin-left:1px;font-family:sans-serif}
+.ph.last::after{content:"✦";display:inline-block;text-indent:0;text-decoration:none;font-size:.62em;color:var(--ph);vertical-align:super;margin-left:1px;font-family:sans-serif}
 .ph:hover{background:color-mix(in srgb,var(--ph) 12%,transparent);border-radius:3px}
-/* 小卡片（查字典、點底線） */
+/* 小卡片（點底線） */
 .wcard{position:fixed;z-index:40;width:min(380px,calc(100vw - 24px));max-height:min(70vh,560px);overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 36px rgba(0,0,0,.18);padding:14px 16px;display:flex;flex-direction:column;gap:10px;font-size:14px}
 .wcard .hd{display:flex;align-items:center;gap:8px}
 .wcard .hw{font-family:var(--f-read);font-size:22px;font-weight:600;line-height:1.2}
@@ -365,6 +365,39 @@ table.vt .fg{font-family:var(--f-mono);font-size:12px;text-align:center}
 .pcard .acts{display:flex;gap:4px;justify-content:flex-end;margin-top:auto}
 .pcard.err{border-left-color:var(--bad)} .pcard.run{border-left-color:var(--line)}
 .morebtn{display:block;margin:20px auto 0}
+/* ---------- 像在讀書：紙、首行縮排、左右對齊、章名、首字放大、書眉、頁碼 ---------- */
+:root{--paper:#fbf7ef;--pink:#2b2722;--pmuted:#8b8174;--pline:#e9e1d3}
+:root[data-theme="dark"]{--paper:#17140f;--pink:#e9e2d4;--pmuted:#8f8677;--pline:#2c271f}
+@media (prefers-color-scheme:dark){:root[data-theme="system"]{--paper:#17140f;--pink:#e9e2d4;--pmuted:#8f8677;--pline:#2c271f}}
+#rs{background:var(--paper)}
+#vRead .rbar{background:var(--paper);border-bottom-color:var(--pline)}
+.sheet .gut::after{background:var(--pline)}
+.sheet .r2{padding:0}
+.sheet .r2>.L{padding-right:44px}
+.para{max-width:min(680px,100%)}
+.ptx *{text-indent:0}
+.ptx{color:var(--pink);text-align:justify;text-justify:inter-word;hyphens:auto;-webkit-hyphens:auto;line-height:1.72;text-indent:1.6em;margin:0;font-variant-ligatures:common-ligatures;font-kerning:normal}
+.ptx.noind{text-indent:0}
+.r2.rc+.r2.rc .para{margin-top:0}
+.para.hd{text-align:center;margin:1.4em auto .9em}
+.para.hd .ptx{text-indent:0;text-align:center;font-weight:600;font-size:calc(var(--fs) * 1.35);line-height:1.3;letter-spacing:.01em}
+.para.hd.sub{text-align:left;margin:1.1em auto .5em}
+.para.hd.sub .ptx{text-align:left;font-size:calc(var(--fs) * 1.08)}
+.para.cap .ptx::first-letter{float:left;font-size:3.3em;line-height:.82;padding:.06em .08em 0 0;font-weight:600;color:var(--pink)}
+.zh{color:var(--pmuted);border-left-color:var(--pline);text-indent:0}
+.runhead{flex:1;min-width:0;text-align:center;font-family:var(--f-read);font-variant:small-caps;letter-spacing:.12em;font-size:12.5px;color:var(--pmuted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.folio{font-family:var(--f-read);font-size:13px;color:var(--pmuted);letter-spacing:.08em;white-space:nowrap}
+.folio .pgsub{margin-left:6px}
+.rfoot{border-top:0!important;justify-content:space-between}
+.rfoot .pgbtn,.ptop .pgbtn{background:transparent!important;border-color:transparent;color:var(--pmuted)}
+.rfoot .pgbtn:hover:not(:disabled),.ptop .pgbtn:hover:not(:disabled){color:var(--pink);border-color:var(--pline)}
+.rhead{padding:16px 0 18px}
+.sheet .R .pnote{color:var(--pink)}
+.sheet .R .pnote.has{border-left-color:var(--pline)}
+.rhead textarea{background:transparent!important;border-color:transparent!important;color:var(--pink)}
+.rhead textarea:focus{border-color:var(--pline)!important}
+.rhead textarea::placeholder{color:transparent}
+.rhead:hover textarea::placeholder,.rhead textarea:focus::placeholder{color:var(--pmuted)}
 </style></head>
 <body>
 <div class="top">
@@ -374,7 +407,7 @@ table.vt .fg{font-family:var(--f-mono);font-size:12px;text-align:center}
   </nav>
   <span class="grow"></span>
   <span id="libTools" class="row" style="gap:10px;flex-wrap:nowrap">
-    <button type="button" class="colbtn vwb" data-f="vocab" title="我的字典（收藏的單字、查字典）" aria-label="我的字典"><svg class="i" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20v3H6.5A2.5 2.5 0 0 1 4 20.5zM9 7h7M9 10.5h5"/></svg><span class="cn" id="vwN"></span></button>
+    <button type="button" class="colbtn vwb" data-f="vocab" title="我的字典（收藏的單字）" aria-label="我的字典"><svg class="i" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20v3H6.5A2.5 2.5 0 0 1 4 20.5zM9 7h7M9 10.5h5"/></svg><span class="cn" id="vwN"></span></button>
     <button type="button" class="colbtn phb" data-f="phr" title="句子收藏（收藏的片語、句型）" aria-label="句子收藏"><svg class="i" viewBox="0 0 24 24"><path d="M7 7h4v4c0 3-1.5 5-4 6M14 7h4v4c0 3-1.5 5-4 6"/></svg><span class="cn" id="phN"></span></button>
     <label class="srch"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" id="q" placeholder="搜尋書、單字、句子" aria-label="搜尋"></label>
     <div class="seg ic" role="group" aria-label="顯示方式"><button type="button" data-view="grid" class="ib" title="卡片模式" aria-label="卡片模式"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1"/></svg></button><button type="button" data-view="list" class="ib" title="清單模式" aria-label="清單模式"><svg class="i" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r=".8"/><circle cx="4.5" cy="12" r=".8"/><circle cx="4.5" cy="18" r=".8"/></svg></button></div>
@@ -840,16 +873,24 @@ function figHtml(x,i){ const src=`/books/${BOOK.meta.id}/figs/${encodeURICompone
 function pgNav(n,top){
   const prev=`<button type="button" class="pgbtn" data-turn="-1"${PG<=0?' disabled':''} title="上一頁（←）" aria-label="Previous page"><svg class="i" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg><span>Previous</span></button>`;
   const next=`<button type="button" class="pgbtn" data-turn="1"${PG>=n-1?' disabled':''} title="下一頁（→）" aria-label="Next page"><span>Next</span><svg class="i" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>`;
-  return top?prev+next:prev+`<div class="bar" title="讀到 ${PG+1} / ${n} 頁"><i style="width:${Math.round((PG+1)/n*100)}%"></i></div><span class="pc">${PG+1} / ${n}</span>`+next; }
+  return top?prev+next:prev+`<span class="folio" title="第 ${PG+1} 頁，共 ${n} 頁">— ${PG+1} —</span>`+next; }
+// 像章名、小標題：短、不是句子（沒有句尾標點）、大寫開頭
+const SMALLW=new Set('a an the and or of to in on at for with from by as but nor vs is are'.split(' '));
+const isHead=t=>{ if(typeof t!=='string') return false; t=t.trim(); if(t.length>70||/[.!?;:,]["”’)]?$/.test(t)||!/^[A-Z0-9"“‘(]/.test(t)) return false;
+  const ws=t.split(/\s+/); if(ws.length>10) return false; if(t===t.toUpperCase()) return true;
+  const big=ws.filter(w=>!SMALLW.has(w.toLowerCase())); return big.length>0&&big.filter(w=>/^[A-Z0-9"“‘(]/.test(w)).length/big.length>=0.7; };   // 章名：大部分的字大寫開頭
 function renderPage(){
   const P=paras(PG), sh=$('sheet'), n=nPages(); let tn=0;
+  const subHead=(t,i)=>isTxt(t)&&isTxt(P[i+1])&&t.trim().length<=60&&t.trim().split(/\s+/).length<=9&&/^[A-Z0-9"“]/.test(t.trim())&&!/[.!?;:,"”’)]$/.test(t.trim());   // 小標題：很短、沒有句尾標點、後面接一段
+  const kind=P.map((t,i)=>{ if(!isTxt(t)) return ''; if(isHead(t)||subHead(t,i)) return 'hd'; const pv=P[i-1];
+    if(i===0) return 'noind'; if(!isTxt(pv)) return 'noind'; if(isHead(pv)||subHead(pv,i-1)) return (isHead(pv)&&t.length>180&&/^[A-Z]/.test(t)?'cap ':'')+'noind'; return ''; });
   const used=pageUsed(PG), aiBusy=AIPG[PG];
   const cards=cardsOfPage(PG).filter(o=>o.nid&&ST.notes[o.nid]), byPara={}; cards.forEach(o=>(byPara[o.i]=byPara[o.i]||[]).push(o));
   const pn=ST.pageNotes[PG];
   let h=`<div class="gut" role="separator" aria-orientation="vertical" aria-label="拖曳調整左右寬度" tabindex="0"></div>
-    <div class="r2 rhead"><div class="L"><div class="ptop"><span class="pgsep">第 ${PG+1} 頁 ／ 共 ${n} 頁</span>${P.some(isTxt)?`<button type="button" class="ib ghost aipg" data-aipage${used||aiBusy?' disabled':''} title="${used?'這一頁已經有螢光筆、筆記或翻譯，不能再重新整理':aiBusy?'AI 整理中…':'這一頁排版怪怪的？用 AI 整理這一頁（重新分段、修正 OCR 錯字）'}" aria-label="用 AI 整理這一頁">${aiBusy?'<span class="spin"></span>':'<svg class="i" viewBox="0 0 24 24"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 15l.6 1.4L7 17l-1.4.6L5 19l-.6-1.4L3 17l1.4-.6z"/></svg>'}</button>`:''}${(BOOK.meta.ocrBad||[]).includes(PG)&&!aiBusy?`<button type="button" class="ocrwarn" data-aipage${used?' disabled':''} title="${used?'這頁可能有辨識錯字，但已經有螢光筆或筆記，不能再整理':'這頁可能有辨識錯字（掃描書），按一下用 AI 修正'}">⚠ 可能有錯字</button>`:''}${AIPG_ERR[PG]?`<span class="err" style="margin-left:8px">${esc(AIPG_ERR[PG])}</span>`:''}<span class="grow"></span>${pgNav(n,1)}</div></div><div class="R"><textarea id="pgNote" rows="1" placeholder="這一頁的筆記…" aria-label="這一頁的筆記">${esc(pn||'')}</textarea></div></div>`;
+    <div class="r2 rhead"><div class="L"><div class="ptop"><span class="runhead" title="${esc(BOOK.meta.title)}">${esc(String(BOOK.meta.title).split(/[:：]/)[0])}</span>${P.some(isTxt)?`<button type="button" class="ib ghost aipg" data-aipage${used||aiBusy?' disabled':''} title="${used?'這一頁已經有螢光筆、筆記或翻譯，不能再重新整理':aiBusy?'AI 整理中…':'這一頁排版怪怪的？用 AI 整理這一頁（重新分段、修正 OCR 錯字）'}" aria-label="用 AI 整理這一頁">${aiBusy?'<span class="spin"></span>':'<svg class="i" viewBox="0 0 24 24"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 15l.6 1.4L7 17l-1.4.6L5 19l-.6-1.4L3 17l1.4-.6z"/></svg>'}</button>`:''}${(BOOK.meta.ocrBad||[]).includes(PG)&&!aiBusy?`<button type="button" class="ocrwarn" data-aipage${used?' disabled':''} title="${used?'這頁可能有辨識錯字，但已經有螢光筆或筆記，不能再整理':'這頁可能有辨識錯字（掃描書），按一下用 AI 修正'}">⚠ 可能有錯字</button>`:''}${AIPG_ERR[PG]?`<span class="err" style="margin-left:8px">${esc(AIPG_ERR[PG])}</span>`:''}<span class="grow"></span>${pgNav(n,1)}</div></div><div class="R"><textarea id="pgNote" rows="1" placeholder="這一頁的筆記…" aria-label="這一頁的筆記">${esc(pn||'')}</textarea></div></div>`;
   if(!P.length) h+=`<div class="r2"><div class="L"><div class="notext">${BOOK.meta.hasText?'這一頁沒有文字（可能是圖片或空白頁）。':'這本 PDF 是掃描圖片，抽不出文字。'}<br><button type="button" class="small" style="margin-top:10px" data-mode-go="pdf">看原始頁面</button></div></div><div class="R"></div></div>`;
-  else h+=P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div><div class="R"></div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para" id="en${i}"><span class="no">${++tn}</span><div class="ptx" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div>
+  else h+=P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div><div class="R"></div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${kind[i].includes('hd')?' hd':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div>
     <div class="R">${(byPara[i]||[]).map(o=>cardHtml(o)).join('')}${paraNoteHtml(PG,i)}</div></div>`).join('');
   h+=`<div class="r2 rf"><div class="L"><div class="rfoot">${pgNav(n)}</div></div><div class="R"></div></div>`;
   sh.innerHTML=h; sh.querySelectorAll('textarea').forEach(autoGrow); paginate();
@@ -878,9 +919,7 @@ function paginate(keep){
   const n=nPages(), first=PG<=0&&SUB<=0, last=PG>=n-1&&SUB>=SUBN-1;
   sh.querySelectorAll('[data-turn="-1"]').forEach(b=>b.disabled=first); sh.querySelectorAll('[data-turn="1"]').forEach(b=>b.disabled=last);
   $('prev').disabled=first; $('next').disabled=last;
-  const ps=sh.querySelector('.pgsep'); if(ps) ps.innerHTML=`第 ${PG+1} 頁 ／ 共 ${n} 頁${SUBN>1?`<span class="pgsub">${SUB+1}/${SUBN}</span>`:''}`;
-  const bar=sh.querySelector('.rfoot .bar i'); if(bar) bar.style.width=Math.round((PG+(SUB+1)/SUBN)/n*100)+'%';
-  const pc=sh.querySelector('.rfoot .pc'); if(pc) pc.textContent=`${PG+1}${SUBN>1?`（${SUB+1}/${SUBN}）`:''} / ${n}`;
+  const fo=sh.querySelector('.folio'); if(fo) fo.innerHTML=`— ${PG+1} —${SUBN>1?`<span class="pgsub">${SUB+1}/${SUBN}</span>`:''}`;
 }
 function firstShown(){ return SUBG[SUB]&&SUBG[SUB][0]; }
 function turn(d){
@@ -928,8 +967,7 @@ function showPop(x,y,ctx){
   const sctx=sentenceAt(paras(PG)[ctx.segs[0][0]],ctx.segs[0][1]);
   d.innerHTML=[1,2,3,4].map(c=>`<button type="button" class="sw sw${c}" data-c="${c}" title="${CNAME[c-1]}色螢光筆" aria-label="${CNAME[c-1]}色螢光筆"></button>`).join('')
     +'<span class="sep"></span>'
-    +(isDict?`<button type="button" class="ib ghost" data-a="dict" title="查字典" aria-label="查字典">${ICV}</button>`:'')
-    +(isDict?`<button type="button" class="ib ghost" data-a="word" title="收藏單字 ◆（之後所有書裡都會畫底線）" aria-label="收藏單字" style="color:var(--vw)"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l7 9-7 9-7-9z"/></svg></button>`:'')
+    +(isDict?`<button type="button" class="ib ghost" data-a="word" title="收進我的字典 ◆（之後所有書裡都會畫底線）" aria-label="收進我的字典" style="color:var(--vw)">${ICV}</button>`:'')
     +(isSent?`<button type="button" class="ib ghost" data-a="phr" title="收藏句子 ✦（AI 會整理句型、例句）" aria-label="收藏句子" style="color:var(--ph)">${ICP}</button>`:'')
     +`<span class="sep"></span><button type="button" class="ib ghost" data-a="note" title="寫筆記" aria-label="寫筆記"><svg class="i" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></svg></button>`
     +(ctx.existing||ctx.hasMark?`<button type="button" class="ib ghost" data-a="clear" title="清除螢光筆" aria-label="清除螢光筆"><svg class="i" viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></button>`:'')
@@ -941,7 +979,6 @@ function showPop(x,y,ctx){
     if(b.dataset.c) applyMark(ctx.segs,+b.dataset.c,ctx.existing?ctx.existing[3]:'');
     else if(b.dataset.a==='clear') applyMark(ctx.segs,0);
     else if(b.dataset.a==='copy') navigator.clipboard&&navigator.clipboard.writeText(ctx.quote).then(()=>toast('已複製'),()=>{});
-    else if(b.dataset.a==='dict') dictCard(one,sctx,{left:x-1,width:2,top:y,bottom:y+24});
     else if(b.dataset.a==='word') saveWord(one,sctx);
     else if(b.dataset.a==='phr') savePhrase(one,sctx);
     else if(b.dataset.a==='note'){ if(ctx.existing&&ctx.existing[3]) focusNote(ctx.existing[3]); else addNoteFor(ctx.segs,1,ctx.existing); } };
@@ -1104,29 +1141,13 @@ function placeCard(d,rc){ document.body.appendChild(d); WCARD=d; const w=d.offse
 document.addEventListener('mousedown',e=>{ if(WCARD&&!e.target.closest('.wcard')&&!e.target.closest('.hlpop')) hideCard(); });
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&WCARD){ hideCard(); e.stopPropagation(); } },true);
 function ctxBold(ctx,w){ const k=String(w||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); return esc(ctx).replace(new RegExp('('+k+"[a-z]{0,3})",'i'),'<b>$1</b>'); }
-function meaningHtml(r){ if(!r) return '<div class="note"><span class="spin"></span>查字典中…</div>'; const en=r.en||{};
+function meaningHtml(r){ if(!r) return '<div class="note"><span class="spin"></span>載入中…</div>'; const en=r.en||{};
   let h=r.t?`<div class="zhm">${esc(r.t)}</div>`:'<div class="note">本機字典查不到這個字，可以按「AI 解釋」。</div>';
   if(en.defs&&en.defs.length) h+=`<div><div class="lab">英英（Free Dictionary）</div><ol class="defs">${en.defs.slice(0,3).map(d=>`<li><em>${esc(d.pos)}</em>${esc(d.def)}${d.ex?` <span class="note">— ${esc(d.ex)}</span>`:''}</li>`).join('')}</ol></div>`;
   if(r.ex&&r.ex.length) h+=`<div><div class="lab">例句${r.exBy==='ai'?'（AI）':''}</div><div class="exs">${r.ex.map(([a,b])=>`<div>${esc(a)}${b?`<small>${esc(b)}</small>`:''}</div>`).join('')}</div></div>`;
   return h; }
-// 查字典（選字時、字典頁）
-async function dictCard(w,ctx,rc,inPage){
-  w=String(w).trim(); const k=wk(w), saved=(VLIST||[]).find(v=>v.k===k);
-  const d=inPage||document.createElement('div'); if(!inPage){ hideCard(); d.className='wcard'; d.setAttribute('role','dialog'); d.setAttribute('aria-label','字典：'+w); }
-  const draw=(r,ai)=>{ const en=(r&&r.en)||{};
-    d.innerHTML=`<div class="hd"><span class="hw">${esc(w)}</span>${en.phonetic?`<span class="phon">${esc(en.phonetic)}</span>`:''}<button type="button" class="ib ghost saybtn" data-say title="發音" aria-label="發音">${ICSAY}</button><span class="grow"></span>${saved||d._saved?'<span class="tag vwc">已收藏 ◆</span>':''}</div>
-      ${meaningHtml(r)}${ai?`<div class="aibox">${ai==='busy'?'<span class="note"><span class="spin"></span>AI 解釋中…</span>':ai.err?`<span class="err">${esc(ai.err)}</span>`:`<div><b>${esc(ai.pos||'')}</b> ${esc(ai.zh||'')}${ai.base?` <span class="note">（原形 ${esc(ai.base)}）</span>`:''}</div>${ai.note?`<div class="note">${esc(ai.note)}</div>`:''}${(ai.ex||[]).map(([a,b])=>`<div class="ctx">${esc(a)}<br><small>${esc(b)}</small></div>`).join('')}`}</div>`:''}
-      ${ctx?`<div><div class="lab">在書裡的句子</div><div class="ctx">${ctxBold(ctx,w)}</div></div>`:''}
-      <div class="acts">${saved||d._saved?'':`<button type="button" class="small primary" data-savew>◆ 收藏單字</button>`}<button type="button" class="small" data-aiex>${ICAI.replace('class="i"','class="i" style="display:inline-block;vertical-align:-3px;width:14px;height:14px"')} AI 解釋${ctx?'（這句的意思）':''}</button>
-        <a class="small note" style="margin-left:auto" href="https://dictionary.cambridge.org/zht/詞典/英語-漢語-繁體/${encodeURIComponent(k)}" target="_blank" rel="noopener">劍橋 ↗</a></div>`;
-    d.querySelector('[data-say]').onclick=()=>say(w,en.audio);
-    const sv=d.querySelector('[data-savew]'); if(sv) sv.onclick=async()=>{ await saveWord(w,ctx); d._saved=1; draw(r,ai); };
-    d.querySelector('[data-aiex]').onclick=async()=>{ draw(r,'busy'); try{ draw(r,await api.post('/api/explain',{w,ctx})); }catch(e){ draw(r,{err:e.message}); } }; };
-  draw(null); if(!inPage) placeCard(d,rc);
-  let r; try{ r=await api.get('/api/meaning?w='+encodeURIComponent(w)); }catch(e){ r={t:'',err:e.message}; }
-  if(!inPage&&WCARD!==d) return; draw(r);
-}
-async function saveWord(w,ctx){ try{ const j=await api.post('/api/vocab/add',{w,ctx:ctx||'',title:BOOK?BOOK.meta.title:'',book:BOOK?BOOK.meta.id:'',page:BOOK?PG:null}); toast(j.dup?'已經收藏過了':'已收藏 ◆ '+esc(w)); await loadMarks(); }catch(e){ toast('收藏失敗：'+esc(e.message)); } }
+async function saveWord(w,ctx){ try{ const j=await api.post('/api/vocab/add',{w,ctx:ctx||'',title:BOOK?BOOK.meta.title:'',book:BOOK?BOOK.meta.id:'',page:BOOK?PG:null}); const m=((j.meaning||{}).t||'').slice(0,60);
+  toast((j.dup?'已經在字典裡了 ◆ ':'已收進字典 ◆ ')+`<b>${esc(w)}</b>`+(m?'：'+esc(m):''),4000); await loadMarks(); if(!$('vLib').hidden) renderLib(true); return j; }catch(e){ toast('收藏失敗：'+esc(e.message)); } }
 async function savePhrase(text,ctx){ try{ const j=await api.post('/api/phrase/add',{text,ctx:ctx||'',title:BOOK?BOOK.meta.title:'',book:BOOK?BOOK.meta.id:'',page:BOOK?PG:null}); toast(j.dup?'這句已經收藏過了':'已收藏句子 ✦ AI 正在整理句型，好了會在文章裡畫底線'); await loadMarks(); if(!j.dup) phrWatch(j.id); }catch(e){ toast('收藏失敗：'+esc(e.message)); } }
 function phrWatch(id,n){ n=n||0; if(n>60) return; setTimeout(async()=>{ try{ const L=await api.get('/api/phrases'), x=L.find(y=>y.id===id||String(y.id).startsWith(id+'-'));
   if(!x||x.status==='error') return loadMarks(); if(x.status==='done') return loadMarks(); }catch(e){} phrWatch(id,n+1); },n<5?2000:4000); }
@@ -1173,8 +1194,7 @@ function vocabPage(q){
   L.sort(S);
   return `<div class="page"><div class="hd"><button type="button" class="ib" data-f="home" title="回首頁" aria-label="回首頁">${IC.l}</button><span style="color:var(--vw);display:flex">${ICV}</span><h1>我的字典</h1><span class="cnt note">${(VLIST||[]).length} 個單字</span><span class="grow"></span>
       <select id="vsort" aria-label="排序"><option value="forgot"${VSORT==='forgot'?' selected':''}>最常忘記</option><option value="t"${VSORT==='t'?' selected':''}>最新收藏</option><option value="az"${VSORT==='az'?' selected':''}>A → Z</option></select>${ieltsBtn()}</div>
-    <form class="dictbox" id="dictF"><input type="search" id="dictQ" placeholder="查字典：輸入英文單字或片語，按 Enter" aria-label="查字典" autocomplete="off" spellcheck="false"><button class="primary">查詢</button></form>
-    <div class="dres" id="dres" hidden></div>
+    <form class="dictbox" id="dictF"><input type="text" id="dictQ" placeholder="新增單字：輸入英文單字或片語，按 Enter 收進字典" aria-label="新增單字" autocomplete="off" spellcheck="false"><button class="primary">＋ 新增</button></form>
     ${q?`<div class="note" style="margin-bottom:8px">篩選「${esc(q)}」：${L.length} 個</div>`:''}
     ${L.length?`<table class="vt"><colgroup><col style="width:17%"><col style="width:30%"><col class="hm"><col class="hm" style="width:14%"><col style="width:9%"><col style="width:76px"></colgroup>
       <thead><tr><th>單字</th><th>中文</th><th class="hm">收藏時的句子</th><th class="hm">來源</th><th style="text-align:center">忘記</th><th></th></tr></thead><tbody>
@@ -1217,7 +1237,7 @@ $('vLib').addEventListener('click',async e=>{ const t=e.target;
     if(t.closest('[data-pdel]')){ if(!confirm('移除這個句子收藏？')) return; await api.post('/api/phrase/del',{id:x.id}); await loadMarks(); return renderLib(true); } }
 });
 $('vLib').addEventListener('change',e=>{ if(e.target.id==='vsort'){ VSORT=e.target.value; LS.set('vsort',VSORT); renderLib(true); } });
-$('vLib').addEventListener('submit',e=>{ if(e.target.id!=='dictF') return; e.preventDefault(); const w=$('dictQ').value.trim(); if(!w) return; const box=$('dres'); box.hidden=false; dictCard(w,'',null,box); });
+$('vLib').addEventListener('submit',async e=>{ if(e.target.id!=='dictF') return; e.preventDefault(); const w=$('dictQ').value.trim(); if(!w) return; $('dictQ').value=''; await saveWord(w,''); });
 
 /* ---------- 開始 ---------- */
 loadMarks();

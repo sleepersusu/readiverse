@@ -29,6 +29,36 @@ def has_ocrmac():
     except Exception: return False
 
 
+def vision_page(pg):
+    """掃描書的一頁：Apple Vision 辨識每一行（位置、大小），照排版自己分段（Docling 會把 OCR 的行順序弄亂）"""
+    import re, statistics
+    from ocrmac import ocrmac
+    img = pg.render(scale=2.5).to_pil()
+    L = [(t.strip(), x, y, w, h) for t, c, (x, y, w, h) in ocrmac.OCR(img, recognition_level='accurate', language_preference=['en-US']).recognize() if t.strip()]
+    if not L: return []
+    L.sort(key=lambda r: -(r[2] + r[4]))                        # 由上往下
+    hs = sorted(r[4] for r in L); medh = hs[len(hs) // 2]
+    xs = sorted(r[1] for r in L); left = xs[max(0, len(xs) // 10)]
+    ws = sorted(r[3] for r in L); maxw = ws[min(len(ws) - 1, len(ws) * 9 // 10)]
+    out, cur, prev, kinds = [], None, None, []
+    for t, x, y, w, h in L:
+        head = h > medh * 1.3 and w < maxw * 0.75 and len(t.split()) <= 10 and not re.search(r'[.!?,;]$', t)
+        new = (prev is None or head or prev['head'] or x > left + 0.025
+               or (prev['y'] - (y + h)) > medh * 1.2
+               or (prev['w'] < maxw * 0.85 and re.search(r'[.!?:"”’]$', prev['t'])))
+        if new:
+            if cur is not None: out.append(cur); kinds.append(prev['head'])
+            if prev is not None and prev['head'] and not head:      # 章名後第一段：首字放大被辨識成亂碼（「ace The last…」、「A As my…」）
+                t = re.sub(r'^[a-z]{1,4}\s+(?=[A-Z])', '', t)
+            t = re.sub(r'^([A-Z])\s+(?=\1[a-z])', '', t)                  # 「A As my old professor」
+            cur = t
+        elif re.search(r'[A-Za-z]-$', cur) and re.match(r'[a-z]', t): cur = cur[:-1] + t
+        else: cur = cur + ' ' + t
+        prev = {'t': t, 'y': y, 'w': w, 'head': head}
+    if cur is not None: out.append(cur)
+    return out
+
+
 def main():
     pdf, figdir = sys.argv[1], sys.argv[2]
     chunk = int(sys.argv[3]) if len(sys.argv) > 3 else 20
@@ -40,6 +70,15 @@ def main():
     scanned = is_scanned(pd)
     use_vision = scanned and sys.platform == 'darwin' and has_ocrmac()
     print(json.dumps({'total': total, 'scanned': scanned, 'ocr': 'apple-vision' if use_vision else ''}), flush=True)
+
+    if use_vision:                       # 掃描書：Apple Vision 一頁一頁辨識，自己分段（不經過 Docling）
+        for a in range(start, total + 1, chunk):
+            b = min(total, a + chunk - 1); pages = {}
+            for n in range(a, b + 1):
+                try: pages[str(n)] = vision_page(pd[n - 1])
+                except Exception as e: print(json.dumps({'warn': 'page %d: %s' % (n, e)}), flush=True)
+            print(json.dumps({'from': a, 'to': b, 'pages': pages}, ensure_ascii=False), flush=True)
+        return
 
     from docling.document_converter import DocumentConverter, PdfFormatOption
     from docling.datamodel.base_models import InputFormat

@@ -265,7 +265,9 @@ def clean_pages(pages, frozen=()):
                 toks = x.split()
                 while toks and _noise_tok(toks[0]): toks.pop(0)
                 x = ' '.join(toks)
+                x = re.sub(r'^(?:[-–•·]|[a-z])\s+(?=[A-Z"“])', '', x)   # 章節開頭的大寫裝飾字被辨識成「-」或一個小寫字母（「a The last class…」）
                 if not x or re.fullmatch(r'(page\s*)?[\divxlc]{1,5}', x, re.I): continue      # 只有頁碼
+                if re.fullmatch(r'[A-HJ-Za-z]{1,2}|[^\w\s]{1,3}', x): continue           # 裝飾字、單獨一兩個字母（「N」）
             out.append(x)
         pages[p] = out
     # 2) 頁首頁尾：很多頁的開頭／結尾都出現的短句（書名、章名、「78 EMOTIONALLY CHARGED」）
@@ -306,21 +308,25 @@ def clean_pages(pages, frozen=()):
         if p in frozen: continue
         out = []
         for x in pg:
-            if is_text(x) and out and is_text(out[-1]) and not re.search(r'[.!?:;"”’)\]—–]$', out[-1].strip()) and re.match(r'[a-z]', x):
+            prev = out[-1].strip() if out and is_text(out[-1]) else ''
+            cont = is_text(x) and prev and not re.search(r'[.!?:;"”’)\]—–]$', prev) and (re.match(r'[a-z]', x) or (len(prev) > 60 and re.search(r'[a-z,]$', prev)))
+            if cont:
                 out[-1] = (out[-1][:-1] if re.search(r'[A-Za-z]-$', out[-1]) else out[-1] + ' ') + x
             else: out.append(x)
         pages[p] = out
-    # 4) 跨頁斷字：這頁最後是「ex-」，下一頁開頭是「pected …」→ 接回這一頁
+    # 4) 跨頁的段落：這頁最後一段沒寫完、下一頁第一段是它的後半 → 整段接回這一頁（段落不要斷在兩頁）
     for p in range(n - 1):
         if p in frozen or (p + 1) in frozen: continue
         a = [i for i, x in enumerate(pages[p]) if is_text(x)]; b = [i for i, x in enumerate(pages[p + 1]) if is_text(x)]
-        if not a or not b: continue
-        last, first = pages[p][a[-1]], pages[p + 1][b[0]]
-        m = re.match(r'([a-z][\w’\'-]*[.,;:!?]?)\s*(.*)$', first, re.S)
-        if re.search(r'[A-Za-z]-$', last) and m:
-            pages[p][a[-1]] = last[:-1] + m.group(1)
-            if m.group(2).strip(): pages[p + 1][b[0]] = m.group(2).strip()
-            else: pages[p + 1].pop(b[0])
+        if not a or not b or a[-1] != len(pages[p]) - 1 or b[0] != 0: continue     # 中間隔著圖表：不接
+        last, first = pages[p][a[-1]].strip(), pages[p + 1][b[0]].strip()
+        if re.search(r'[.!?:;"”’)\]—–]$', last): continue
+        if re.search(r'[A-Za-z]-$', last) and re.match(r'[a-z]', first):          # ex- / pected
+            pages[p][a[-1]] = last[:-1] + first
+        elif re.match(r'[a-z(]', first) or (len(last) > 60 and re.search(r'[a-z,]$', last)):
+            pages[p][a[-1]] = last + ' ' + first
+        else: continue
+        pages[p + 1].pop(b[0])
     return pages
 
 

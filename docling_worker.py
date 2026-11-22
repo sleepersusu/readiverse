@@ -30,8 +30,13 @@ def has_ocrmac():
 
 
 def vision_page(pg):
-    """掃描書的一頁：Apple Vision 辨識每一行（位置、大小），照排版自己分段（Docling 會把 OCR 的行順序弄亂）"""
-    import re, statistics
+    """掃描書的一頁：Apple Vision 辨識每一行（位置、大小），照排版自己分段（Docling 會把 OCR 的行順序弄亂）
+    - 頁首（書名、章名）：第一行、短、置中、底下空隙小 → 丟掉
+    - 章名：比內文大，或第一行短、置中、底下空隙大 → 留著當標題
+    - 頁碼：最後一行只有數字 → 丟掉
+    - 新段落：首行縮排、空一行、上一行短又是句尾
+    - 章名後第一段：首字放大／花紋被辨識成的亂碼（「ace The…」「me The…」）拿掉"""
+    import re
     from ocrmac import ocrmac
     img = pg.render(scale=2.5).to_pil()
     L = [(t.strip(), x, y, w, h) for t, c, (x, y, w, h) in ocrmac.OCR(img, recognition_level='accurate', language_preference=['en-US']).recognize() if t.strip()]
@@ -40,17 +45,27 @@ def vision_page(pg):
     hs = sorted(r[4] for r in L); medh = hs[len(hs) // 2]
     xs = sorted(r[1] for r in L); left = xs[max(0, len(xs) // 10)]
     ws = sorted(r[3] for r in L); maxw = ws[min(len(ws) - 1, len(ws) * 9 // 10)]
-    out, cur, prev, kinds = [], None, None, []
-    for t, x, y, w, h in L:
-        head = h > medh * 1.3 and w < maxw * 0.75 and len(t.split()) <= 10 and not re.search(r'[.!?,;]$', t)
+    while L and re.fullmatch(r'[\divxlcIVXLC]{1,5}', L[-1][0]): L.pop()          # 頁碼
+    if not L: return []
+    heads = set()
+    if len(L) > 1:
+        t, x, y, w, h = L[0]; nxt = L[1]
+        gap = y - (nxt[2] + nxt[4]); cx = x + w / 2
+        short = w < maxw * 0.7 and len(t.split()) <= 10 and not re.search(r'[.!?,;]$', t)
+        centered = abs(cx - 0.5) < 0.08
+        if short and h > medh * 1.3: heads.add(0)                                           # 章名：字比內文大
+        elif short and centered and y + h > 0.8: L = L[1:]                                    # 頁首（書名、章名，字不大、在最上面）
+    out, cur, prev = [], None, None
+    for k, (t, x, y, w, h) in enumerate(L):
+        head = k in heads or (h > medh * 1.3 and w < maxw * 0.75 and len(t.split()) <= 10 and not re.search(r'[.!?,;]$', t))
         new = (prev is None or head or prev['head'] or x > left + 0.025
                or (prev['y'] - (y + h)) > medh * 1.2
                or (prev['w'] < maxw * 0.85 and re.search(r'[.!?:"”’]$', prev['t'])))
         if new:
-            if cur is not None: out.append(cur); kinds.append(prev['head'])
-            if prev is not None and prev['head'] and not head:      # 章名後第一段：首字放大被辨識成亂碼（「ace The last…」、「A As my…」）
-                t = re.sub(r'^[a-z]{1,4}\s+(?=[A-Z])', '', t)
-            t = re.sub(r'^([A-Z])\s+(?=\1[a-z])', '', t)                  # 「A As my old professor」
+            if cur is not None: out.append(cur)
+            if prev is not None and prev['head'] and not head:
+                t = re.sub(r'^[a-z]{1,4}\s+(?=[A-Z])', '', t)       # 花紋、首字放大被辨識成的亂碼
+            t = re.sub(r'^([A-Z])\s+(?=\1[a-z])', '', t)            # 「A As my old professor」
             cur = t
         elif re.search(r'[A-Za-z]-$', cur) and re.match(r'[a-z]', t): cur = cur[:-1] + t
         else: cur = cur + ' ' + t

@@ -265,7 +265,8 @@ def clean_pages(pages, frozen=()):
                 toks = x.split()
                 while toks and _noise_tok(toks[0]): toks.pop(0)
                 x = ' '.join(toks)
-                x = re.sub(r'^(?:[-–•·]|[a-z])\s+(?=[A-Z"“])', '', x)   # 章節開頭的大寫裝飾字被辨識成「-」或一個小寫字母（「a The last class…」）
+                x = re.sub(r'^(?:[-–•·*«»~&§¶|]+|[a-z])\s+(?=[A-Z"“‘])', '', x)   # 章節、小節開頭的花紋被辨識成「*」「•」「-」或一個小寫字母
+                x = re.sub(r'(\d)- (?=[A-Z])', r'\1. ', x)                       # 「summer of 1994- Looking」：句號被認成「-」
                 if not x or re.fullmatch(r'(page\s*)?[\divxlc]{1,5}', x, re.I): continue      # 只有頁碼
                 if re.fullmatch(r'[A-HJ-Za-z]{1,2}|[^\w\s]{1,3}', x): continue           # 裝飾字、單獨一兩個字母（「N」）
             out.append(x)
@@ -303,6 +304,14 @@ def clean_pages(pages, frozen=()):
                 if prev and not re.search(r'[.!?:;"”’)]$', prev.strip()) and m: x = m.group(2)
             keep.append(x)
         pages[p] = keep
+    # 3.4) 小節開頭的花紋被認成小寫字（「me Now, five minutes later」）：上一段已經用句號結束，這段卻是小寫字＋大寫開頭 → 拿掉那個字
+    last_t = ''
+    for p, pg in enumerate(pages):
+        for k, x in enumerate(pg):
+            if not is_text(x): continue
+            if p not in frozen and re.match(r'^[a-z]{1,4}\s+[A-Z][a-z]', x) and (not last_t or re.search(r'[.!?"”’)]$', last_t.strip()) or _headish(last_t)):
+                x = re.sub(r'^[a-z]{1,4}\s+', '', x); pg[k] = x
+            last_t = x
     # 3.5) 被切成兩段的句子：上一段沒有句尾標點、下一段小寫開頭 → 接起來（掃描書常見：「That was / the end of…」）
     for p, pg in enumerate(pages):
         if p in frozen: continue

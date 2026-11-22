@@ -194,7 +194,8 @@ dialog h2{font-family:var(--f-zh);font-size:17px;margin:0 0 14px}
 .rbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--line)}
 .rbar .seg .ib{border-radius:0;height:32px;border:0}
 #zhBtn.on,#allBtn.on{background:var(--ink)!important;color:var(--bg);border-color:var(--ink)!important}
-.rbar .bt{font-family:var(--f-read);font-weight:600;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:30vw}
+.rbar .bt{font-family:var(--f-read);font-weight:600;font-size:16px;line-height:1.3;flex:1;min-width:0;overflow-wrap:anywhere}
+.rbar>.grow{flex:0 0 0}
 .pgnav{display:flex;align-items:center;gap:4px;font-family:var(--f-mono);font-size:13px}
 .pgnav input{width:64px;text-align:center;min-height:30px;padding:2px 4px;font-family:var(--f-mono)}
 .ib{width:32px;height:32px;min-height:0;padding:0;display:inline-flex;align-items:center;justify-content:center}
@@ -204,6 +205,9 @@ dialog h2{font-family:var(--f-zh);font-size:17px;margin:0 0 14px}
 .sheet{position:relative;padding:0 clamp(12px,3vw,40px) 14px;min-height:100%;display:flex;flex-direction:column}
 .sheet>.rf{margin-top:auto}
 .r2.off{display:none!important}
+.r2.cut{overflow:hidden}
+@media (max-width:860px){.sheet .pnote:not(.has):not(:focus){display:none} .sheet .r2>.R:not(:has(.pnote.has,.hcard,.pnote:focus)){display:none} .sheet .r2>.L{padding-right:0}}
+.r2.cut>.L,.r2.cut>.R{transform:translateY(var(--off,0))}
 .sheet.tn{animation:tn .22s ease-out} .sheet.tp{animation:tp .22s ease-out}
 @keyframes tn{from{opacity:0;transform:translateX(28px)}to{opacity:1;transform:none}}
 @keyframes tp{from{opacity:0;transform:translateX(-28px)}to{opacity:1;transform:none}}
@@ -250,9 +254,15 @@ mark.hl.lit{box-shadow:0 0 0 2px var(--ink)}
 .tbl th{background:var(--soft);font-weight:600}
 .aipg{width:28px;height:28px;margin-left:8px;color:var(--muted)}
 .aipg:hover:not(:disabled){color:var(--acc)}
+.aipgbtn{position:relative}
+.aipgbtn.warn::after{content:"";position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;background:#e0a100}
+.aipgbtn.busy svg{animation:sp 1.2s linear infinite}
 .ocrwarn{margin-left:6px;min-height:24px;padding:1px 9px;font-size:11.5px;border-radius:999px;border:1px solid #e0a100;color:#9a6b00;background:#fff8e1}
 :root[data-theme="dark"] .ocrwarn{background:#2a2200;color:#ffcc4d;border-color:#7a5e00}
 .rhead .L{align-items:center!important;display:block!important}
+.sheet{transition:opacity .12s ease}
+.sheet.fsfade{opacity:0}
+@media (prefers-reduced-motion:reduce){.sheet{transition:none}}
 .pgsub{font-family:var(--f-mono);font-size:11px;color:var(--acc);margin-left:6px}
 .notext{border:1.5px dashed var(--line);border-radius:12px;padding:28px;text-align:center;color:var(--muted)}
 #pdfView{display:flex;justify-content:center;padding:22px 12px 40px}
@@ -429,6 +439,7 @@ table.vt .fg{font-family:var(--f-mono);font-size:12px;text-align:center}
     <span id="rAi"></span>
     <span class="grow"></span>
     <button type="button" class="ib" id="zhBtn" title="中文對照：在每段英文底下顯示 AI 翻譯" aria-label="中文對照" aria-pressed="false"><svg class="i" viewBox="0 0 24 24"><path d="M4 5h8M8 3v2M5.5 5c.5 3 2.5 5.5 5.5 6.5M10.5 5c-.6 3.2-2.8 5.7-6 7"/><path d="M13 21l4-9 4 9M14.4 18h5.2"/></svg></button>
+    <button type="button" class="ib aipgbtn" id="aiPgBtn" title="用 AI 整理這一頁（重新分段、修正 OCR 錯字）" aria-label="用 AI 整理這一頁"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 15l.6 1.4L7 17l-1.4.6L5 19l-.6-1.4L3 17l1.4-.6z"/></svg></button>
     <div class="seg" role="group" aria-label="左邊顯示">
       <button type="button" class="ib" data-mode="text" title="文字模式：可以畫螢光筆、寫筆記" aria-label="文字模式"><svg class="i" viewBox="0 0 24 24"><path d="M5 6h14M5 10h14M5 14h14M5 18h9"/></svg></button><button type="button" class="ib" data-mode="pdf" title="原始 PDF 頁面" aria-label="原始 PDF 頁面"><svg class="i" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><rect x="8" y="11" width="8" height="6" rx="1"/></svg></button>
     </div>
@@ -789,7 +800,7 @@ $('back').onclick=closeBook; $('home').onclick=()=>{ if(BOOK) closeBook(); setFi
 function nPages(){ return Math.max(BOOK.pages.length,BOOK.meta.pages||0); }
 function showPage(p,dir){
   const n=nPages(); if(!n) return; p=Math.max(0,Math.min(n-1,p|0)); const changed=p!==PG||dir===0; if(dir===undefined) dir=p>PG?1:p<PG?-1:0; PG=p;
-  if(changed&&!SUB_END) SUB=0;
+  if(changed&&!SUB_END){ SUB=0; ANCHOR=null; }
   $('pgIn').value=p+1; $('prev').disabled=p<=0; $('next').disabled=p>=n-1;
   document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('on',b.dataset.mode===MODE));
   $('zhBtn').classList.toggle('on',ZH); $('zhBtn').setAttribute('aria-pressed',String(ZH)); $('zhBtn').disabled=MODE!=='text';
@@ -804,8 +815,13 @@ function showPage(p,dir){
 $('prev').onclick=()=>turn(-1); $('next').onclick=()=>turn(1);
 $('pgIn').onchange=()=>showPage(($('pgIn').value|0)-1);
 document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{ MODE=b.dataset.mode; LS.set('mode',MODE); showPage(PG); });
+$('aiPgBtn').onclick=()=>{ if(BOOK) aiPage(PG); };
 $('zhBtn').onclick=()=>{ ZH=!ZH; LS.set('zh',ZH); showPage(PG); };
-let FS=LS.get('fs',18); const setFs=v=>{ FS=Math.max(14,Math.min(28,v)); document.documentElement.style.setProperty('--fs',FS+'px'); LS.set('fs',FS); if(typeof BOOK!=='undefined'&&BOOK&&MODE==='text') paginate(firstShown()); }; setFs(FS);
+let FS=LS.get('fs',18), fsT=null; const setFs=v=>{ FS=Math.max(14,Math.min(28,v)); LS.set('fs',FS);
+  const reading=typeof BOOK!=='undefined'&&BOOK&&MODE==='text'&&!$('vRead').hidden;
+  if(!reading){ document.documentElement.style.setProperty('--fs',FS+'px'); return; }
+  const keep=firstShown(), sh=$('sheet'); sh.classList.add('fsfade'); clearTimeout(fsT);
+  fsT=setTimeout(()=>{ document.documentElement.style.setProperty('--fs',FS+'px'); paginate(keep); requestAnimationFrame(()=>sh.classList.remove('fsfade')); },120); }; setFs(FS);
 $('fsDn').onclick=()=>setFs(FS-1); $('fsUp').onclick=()=>setFs(FS+1);
 document.addEventListener('keydown',e=>{
   if(!BOOK||$('vRead').hidden||e.target.closest('input,textarea,select,[contenteditable="true"]')||$('dlg').open) return;
@@ -889,12 +905,14 @@ function renderPage(){
   const cards=cardsOfPage(PG).filter(o=>o.nid&&ST.notes[o.nid]), byPara={}; cards.forEach(o=>(byPara[o.i]=byPara[o.i]||[]).push(o));
   const pn=ST.pageNotes[PG];
   let h=`<div class="gut" role="separator" aria-orientation="vertical" aria-label="拖曳調整左右寬度" tabindex="0"></div>
-    <div class="r2 rhead"><div class="L"><div class="ptop"><span class="runhead" title="${esc(BOOK.meta.title)}">${esc(String(BOOK.meta.title).split(/[:：]/)[0])}</span>${P.some(isTxt)?`<button type="button" class="ib ghost aipg" data-aipage${used||aiBusy?' disabled':''} title="${used?'這一頁已經有螢光筆、筆記或翻譯，不能再重新整理':aiBusy?'AI 整理中…':'這一頁排版怪怪的？用 AI 整理這一頁（重新分段、修正 OCR 錯字）'}" aria-label="用 AI 整理這一頁">${aiBusy?'<span class="spin"></span>':'<svg class="i" viewBox="0 0 24 24"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 15l.6 1.4L7 17l-1.4.6L5 19l-.6-1.4L3 17l1.4-.6z"/></svg>'}</button>`:''}${(BOOK.meta.ocrBad||[]).includes(PG)&&!aiBusy?`<button type="button" class="ocrwarn" data-aipage${used?' disabled':''} title="${used?'這頁可能有辨識錯字，但已經有螢光筆或筆記，不能再整理':'這頁可能有辨識錯字（掃描書），按一下用 AI 修正'}">⚠ 可能有錯字</button>`:''}${AIPG_ERR[PG]?`<span class="err" style="margin-left:8px">${esc(AIPG_ERR[PG])}</span>`:''}<span class="grow"></span>${pgNav(n,1)}</div></div><div class="R"><textarea id="pgNote" rows="1" placeholder="這一頁的筆記…" aria-label="這一頁的筆記">${esc(pn||'')}</textarea></div></div>`;
+    <div class="r2 rhead"><div class="L"><div class="ptop"><span class="runhead" title="${esc(BOOK.meta.title)}">${esc(String(BOOK.meta.title).split(/[:：]/)[0])}</span>${AIPG_ERR[PG]?`<span class="err" style="margin-left:8px">${esc(AIPG_ERR[PG])}</span>`:''}<span class="grow"></span>${pgNav(n,1)}</div></div><div class="R"><textarea id="pgNote" rows="1" placeholder="這一頁的筆記…" aria-label="這一頁的筆記">${esc(pn||'')}</textarea></div></div>`;
   if(!P.length) h+=`<div class="r2"><div class="L"><div class="notext">${BOOK.meta.hasText?'這一頁沒有文字（可能是圖片或空白頁）。':'這本 PDF 是掃描圖片，抽不出文字。'}<br><button type="button" class="small" style="margin-top:10px" data-mode-go="pdf">看原始頁面</button></div></div><div class="R"></div></div>`;
   else h+=P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div><div class="R"></div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${kind[i].includes('hd')?' hd':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div>
     <div class="R">${(byPara[i]||[]).map(o=>cardHtml(o)).join('')}${paraNoteHtml(PG,i)}</div></div>`).join('');
   h+=`<div class="r2 rf"><div class="L"><div class="rfoot">${pgNav(n)}</div></div><div class="R"></div></div>`;
   sh.innerHTML=h; sh.querySelectorAll('textarea').forEach(autoGrow); paginate();
+  const ab=$('aiPgBtn'), bad=(BOOK.meta.ocrBad||[]).includes(PG); ab.hidden=!P.some(isTxt); ab.disabled=!!(used||aiBusy); ab.classList.toggle('warn',bad&&!used); ab.classList.toggle('busy',!!aiBusy);
+  ab.title=used?'這一頁已經有螢光筆、筆記或翻譯，不能再用 AI 整理':aiBusy?'AI 整理中…':bad?'⚠ 這頁可能有辨識錯字：按一下用 AI 修正':'用 AI 整理這一頁（重新分段、修正 OCR 錯字）';
 }
 function pageUsed(p){ return Object.keys(ST.marks).some(k=>k.startsWith(p+':')&&ST.marks[k].length)||Object.keys(ST.paraNotes).some(k=>k.startsWith(p+':'))||!!ST.zh[p]||Object.values(ST.notes).some(x=>x.page===p); }
 const AIPG={}, AIPG_ERR={};
@@ -902,36 +920,47 @@ async function aiPage(p){ const id=BOOK.meta.id; AIPG[p]=1; delete AIPG_ERR[p]; 
   try{ const j=await api.post(`/api/books/${id}/ai-page`,{page:p}); if(BOOK&&BOOK.meta.id===id){ BOOK.pages[p]=j.page; if(j.ocrBad) BOOK.meta.ocrBad=j.ocrBad; toast('這一頁整理好了'); } }
   catch(e){ AIPG_ERR[p]=e.message; } finally{ delete AIPG[p]; if(BOOK&&BOOK.meta.id===id&&p===PG&&MODE==='text') renderPage(); } }
 /* ---------- 一頁一個畫面：放不下的段落移到下一個畫面（不用上下捲動） ---------- */
-let SUB=0, SUBN=1, SUB_END=false, SUBG=[], RESTORE=null;
+let SUB=0, SUBN=1, SUB_END=false, SUBG=[], RESTORE=null, ANCHOR=null;
 // 記住看到哪裡：第幾頁＋這個畫面的第一段（關掉 App 再打開也會回到這裡）
 function savePos(){ clearTimeout(pgT); pgT=setTimeout(()=>{ if(!BOOK) return; const r=firstShown(), para=r?+(r.dataset.i||r.dataset.fi||0):0;
   api.patch(`/api/books/${BOOK.meta.id}`,{lastPage:PG,lastPara:para}).then(b=>{ if(BOOK&&BOOK.meta.id===b.id) Object.assign(BOOK.meta,b); }).catch(()=>{}); },500); }
 function paginate(keep){
+  // 把這一頁的段落分成好幾個畫面。keep＝要放在畫面最上面的那一段（放大縮小字、換視窗大小時，正在讀的那段不會跑掉）
   const sh=$('sheet'), rs=$('rs'); if(MODE!=='text'||!sh||sh.hidden) return;
-  const rows=[...sh.querySelectorAll(':scope>.rc')]; rows.forEach(r=>r.classList.remove('off'));
+  const rows=[...sh.querySelectorAll(':scope>.rc')]; rows.forEach(r=>{ r.classList.remove('off','cut'); r.style.height=''; r.style.removeProperty('--off'); });   // 先還原再量高度
   const head=sh.querySelector(':scope>.rhead'), foot=sh.querySelector(':scope>.rf');
   const avail=rs.clientHeight-(head?head.offsetHeight:0)-(foot?foot.offsetHeight:0)-18;
-  const G=[]; let cur=[], h=0;
-  rows.forEach(r=>{ const rh=r.offsetHeight; if(cur.length&&h+rh>avail){ G.push(cur); cur=[]; h=0; } cur.push(r); h+=rh; });
-  if(cur.length||!G.length) G.push(cur);
-  SUBG=G; SUBN=G.length;
-  if(keep){ const k=G.findIndex(g=>g.includes(keep)); if(k>=0) SUB=k; }
-  if(SUB_END){ SUB=SUBN-1; SUB_END=false; }
-  if(keep===undefined&&RESTORE!=null){ const k=G.findIndex(g=>g.some(r=>(r.dataset.i||r.dataset.fi)==RESTORE)); if(k>=0) SUB=k; RESTORE=null; }
-  SUB=Math.max(0,Math.min(SUBN-1,SUB));
-  G.forEach((g,k)=>g.forEach(r=>r.classList.toggle('off',k!==SUB)));
-  if(BOOK&&!keep) savePos();
-  rs.classList.toggle('tall',G[SUB].reduce((a,r)=>a+r.offsetHeight,0)>avail+4); rs.scrollTop=0;   // 只有一段長到放不下整個畫面時才可以捲
+  if(keep===undefined&&RESTORE!=null){ keep=rows.find(r=>(r.dataset.i||r.dataset.fi)==RESTORE); RESTORE=null; }
+  if((!keep||!rows.includes(keep))&&ANCHOR&&ANCHOR.pg===PG&&ANCHOR.book===(BOOK&&BOOK.meta.id)&&!SUB_END) keep=rows.find(r=>(r.dataset.i||r.dataset.fi)==ANCHOR.i);
+  // 每一段變成一個或好幾個「片段」：放得下就是整段；太長的段落在行與行之間切開，後半段接到下一個畫面（不用上下捲）
+  const U=[]; rows.forEach(r=>{ const H=r.offsetHeight; if(H<=avail){ U.push({r,off:0,h:H}); return; }
+    const pt=r.querySelector('.ptx'), lh=pt?parseFloat(getComputedStyle(pt).lineHeight)||28:28, sl=Math.max(lh,Math.floor((avail-8)/lh)*lh);
+    for(let o=0;o<H;o+=sl) U.push({r,off:o,h:Math.min(sl,H-o),cut:true}); });
+  const atR=Math.max(0,rows.indexOf(keep)), at=Math.max(0,U.findIndex(u=>u.r===rows[atR]));
+  const fwd=from=>{ const G=[]; let cur=[],h=0; for(let k=from;k<U.length;k++){ if(cur.length&&h+U[k].h>avail){ G.push(cur); cur=[]; h=0; } cur.push(U[k]); h+=U[k].h; } if(cur.length) G.push(cur); return G; };
+  const back=[]; { let cur=[],h=0; for(let k=at-1;k>=0;k--){ if(cur.length&&h+U[k].h>avail){ back.unshift(cur); cur=[]; h=0; } cur.unshift(U[k]); h+=U[k].h; } if(cur.length) back.unshift(cur); }
+  const G=back.concat(fwd(at)); if(!G.length) G.push([]);
+  SUBG=G; SUBN=G.length; SUB=SUB_END?SUBN-1:back.length; SUB_END=false;
+  showSub(); }
+function showSub(){
+  const sh=$('sheet'), rs=$('rs'), G=SUBG; SUB=Math.max(0,Math.min(SUBN-1,SUB));
+  const head=sh.querySelector(':scope>.rhead'), foot=sh.querySelector(':scope>.rf');
+  const avail=rs.clientHeight-(head?head.offsetHeight:0)-(foot?foot.offsetHeight:0)-18;
+  const cur=G[SUB]||[], on=new Set(cur.map(u=>u.r));
+  sh.querySelectorAll(':scope>.rc').forEach(r=>{ r.classList.toggle('off',!on.has(r)); r.classList.remove('cut'); r.style.height=''; r.style.removeProperty('--off'); });
+  cur.forEach(u=>{ if(u.cut){ u.r.classList.add('cut'); u.r.style.height=u.h+'px'; u.r.style.setProperty('--off',(-u.off)+'px'); } });   // 長段落：只露出這一截
+  rs.classList.remove('tall'); rs.scrollTop=0;
   const n=nPages(), first=PG<=0&&SUB<=0, last=PG>=n-1&&SUB>=SUBN-1;
   sh.querySelectorAll('[data-turn="-1"]').forEach(b=>b.disabled=first); sh.querySelectorAll('[data-turn="1"]').forEach(b=>b.disabled=last);
   $('prev').disabled=first; $('next').disabled=last;
   const fo=sh.querySelector('.folio'); if(fo) fo.innerHTML=`— ${PG+1} —${SUBN>1?`<span class="pgsub">${SUB+1}/${SUBN}</span>`:''}`;
-}
-function firstShown(){ return SUBG[SUB]&&SUBG[SUB][0]; }
+  const r=firstShown(); if(r&&BOOK) ANCHOR={book:BOOK.meta.id,pg:PG,i:r.dataset.i||r.dataset.fi};
+  if(BOOK) savePos(); }
+function firstShown(){ const u=SUBG[SUB]&&SUBG[SUB][0]; return u&&(u.r||u); }
 function turn(d){
   if(!BOOK) return; hidePop(); if(typeof hideCard==='function') hideCard();
-  if(MODE==='text'&&d>0&&SUB<SUBN-1){ SUB++; slide(1); return paginate(); }
-  if(MODE==='text'&&d<0&&SUB>0){ SUB--; slide(-1); return paginate(); }
+  if(MODE==='text'&&d>0&&SUB<SUBN-1){ SUB++; slide(1); return showSub(); }
+  if(MODE==='text'&&d<0&&SUB>0){ SUB--; slide(-1); return showSub(); }
   if(d<0&&PG>0){ SUB_END=MODE==='text'; showPage(PG-1); } else if(d>0) showPage(PG+1); }
 function slide(d){ const sh=$('sheet'); sh.classList.remove('tn','tp'); void sh.offsetWidth; sh.classList.add(d>0?'tn':'tp'); }
 function rowOf(el){ return el&&el.closest('#sheet>.rc'); }

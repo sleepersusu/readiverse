@@ -18,9 +18,29 @@ from urllib.parse import urlparse, parse_qs, unquote
 import rv_dict
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _fix_path():
+    """雙擊 App 打開時，macOS 只給很短的 PATH（找不到 claude、codex、node、uv）：補上使用者登入時的 PATH"""
+    if sys.platform.startswith('win'): return
+    extra = []
+    try:
+        sh = os.environ.get('SHELL') or '/bin/zsh'
+        r = subprocess.run([sh, '-lic', 'printf "__P__%s__P__" "$PATH"'], capture_output=True, text=True, timeout=8, stdin=subprocess.DEVNULL)
+        m = re.search(r'__P__(.*?)__P__', r.stdout or '')
+        if m: extra += m.group(1).split(':')
+    except Exception: pass
+    home = os.path.expanduser('~')
+    extra += [home + '/.local/bin', home + '/.npm-global/bin', home + '/.cargo/bin', '/opt/homebrew/bin', '/usr/local/bin']
+    cur = os.environ.get('PATH', '').split(':')
+    os.environ['PATH'] = ':'.join(dict.fromkeys([p for p in cur + extra if p]))
+
+
+_fix_path()
 STATIC = os.path.join(ROOT, 'static')
 CONFIG = os.path.expanduser('~/.readiverse.json')
-LOCAL_LIB = os.path.join(ROOT, '書庫')
+LOCAL_LIB = os.path.expanduser('~/Readiverse書庫')       # 放在使用者資料夾：App 版不能讀「桌面」「文件」「下載」裡的檔案（macOS 的保護）
+OLD_LIB = os.path.join(ROOT, '書庫')                       # 以前的位置（程式資料夾裡）：還在的話第一次打開時搬過去
 CLOUD_DIRNAME = 'Readiverse書庫'
 PORT = int(os.environ.get('READIVERSE_PORT') or 8780)
 LOCK = threading.RLock()
@@ -760,6 +780,9 @@ class H(BaseHTTPRequestHandler):
 
 
 def main():
+    if LIB == LOCAL_LIB and not os.path.exists(LOCAL_LIB) and os.path.isfile(os.path.join(OLD_LIB, '_index.json')):
+        try: shutil.move(OLD_LIB, LOCAL_LIB); print('書庫搬到 %s' % LOCAL_LIB)
+        except OSError as e: print('書庫搬家失敗：%s' % e)
     os.makedirs(LIB, exist_ok=True)
     threading.Thread(target=ai_worker, daemon=True).start()
     rv_dict.init(lambda: LIB, ai_json)

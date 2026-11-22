@@ -4,3 +4,6 @@ __pycache__/
 *.tmp
 static/_test*.pdf
 .claude/
+build/
+dist/
+*.spec

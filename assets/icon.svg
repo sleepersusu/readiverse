@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <path d="M285 100 H739 Q924 100 924 285 V739 Q924 924 739 924 H285 Q100 924 100 739 V285 Q100 100 285 100 Z" fill="#fbf3e7"/>
+  <path d="M285 100 H739 Q924 100 924 285 V739 Q924 924 739 924 H285 Q100 924 100 739 V285 Q100 100 285 100 Z" fill="none" stroke="#e2d3bd" stroke-width="3"/>
+  <!-- open book -->
+  <path d="M512 330 C 430 286 320 282 232 304 L 232 712 C 320 690 430 694 512 738 Z" fill="#ffffff" stroke="#2a211a" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M512 330 C 594 286 704 282 792 304 L 792 712 C 704 690 594 694 512 738 Z" fill="#ffffff" stroke="#2a211a" stroke-width="16" stroke-linejoin="round"/>
+  <g stroke="#cdbfa9" stroke-width="12" stroke-linecap="round" fill="none">
+    <path d="M300 400 C 360 388 410 392 452 408"/><path d="M300 460 C 360 448 410 452 452 468"/><path d="M300 520 C 360 508 410 512 452 528"/>
+    <path d="M572 408 C 614 392 664 388 724 400"/>
+  </g>
+  <!-- highlight + underline on the right page -->
+  <path d="M572 468 C 614 452 664 448 724 460" stroke="#ffe066" stroke-width="30" stroke-linecap="round" fill="none"/>
+  <path d="M572 468 C 614 452 664 448 724 460" stroke="#cdbfa9" stroke-width="12" stroke-linecap="round" fill="none"/>
+  <path d="M572 528 C 614 512 664 508 724 520" stroke="#cdbfa9" stroke-width="12" stroke-linecap="round" fill="none"/>
+  <path d="M572 560 C 614 544 664 540 724 552" stroke="#6b5bd6" stroke-width="10" stroke-linecap="round" fill="none"/>
+  <!-- brand dot -->
+  <circle cx="512" cy="232" r="52" fill="#c2410c"/>
+</svg>

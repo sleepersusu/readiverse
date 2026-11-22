@@ -185,7 +185,7 @@ AI_BAD = {}       # 剛剛失敗的工具：10 分鐘內先跳過，省時間
 
 
 AI_MODELS = [('claude-opus-5-5', 'Opus 5.5', '最強、最準，比較慢、比較花額度'), ('claude-sonnet-5-5', 'Sonnet 5.5', '準、比較快'), ('claude-haiku-5-5', 'Haiku 5.5', '最快、最省額度')]
-AI_DEFAULT = {'best': 'claude-sonnet-5-5', 'fast': 'claude-haiku-5-5'}       # best：校對、整理頁面；fast：翻譯、書名、解釋
+AI_DEFAULT = {'best': 'claude-sonnet-5-5', 'fast': 'claude-haiku-5-5', 'top': 'claude-opus-5-5'}   # top：Sonnet 也解決不了的頁       # best：校對、整理頁面；fast：翻譯、書名、解釋
 
 
 def ai_model(kind='fast'):
@@ -740,7 +740,8 @@ def proof_worker():
 
 PROOF_EVERY = 3      # Sonnet 抽查：每 3 頁 1 頁；有問題的頁再往前後各 2 頁檢查
 PROOF_NEAR = 2
-PROOF_FILES = {'fast': 'proof_fast.json', 'best': 'proof.json'}
+PROOF_FILES = {'fast': 'proof_fast.json', 'best': 'proof.json', 'top': 'proof_top.json'}
+PROOF_TOP_NEAR = 5   # Sonnet 也修不好的頁：Opus 看這一頁和前後各 5 頁
 
 
 def proof_job(bid):
@@ -825,11 +826,29 @@ def proof_job(bid):
         run_round(todo, 'best', 2)
     total = len(plan)
     if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
+    # 第 3 輪：Sonnet 也解決不了的頁（修正套不上去、或者看完還是像亂碼）→ Opus 看這一頁和前後各 5 頁
+    with LOCK:
+        pages = read_json(os.path.join(d, 'pages.json')) or []
+        frozen = used_pages(read_json(os.path.join(d, 'state.json'), {}))
+    hard = set()
+    for k, v in recs('best').items():
+        F = (v or {}).get('failed') or []
+        if not F or not str(k).isdigit() or int(k) - 1 >= len(pages): continue
+        test = json.loads(json.dumps(pages))                            # 先試套一次（不存）：現在套得上去就不算
+        _, fl = apply_proof(test, int(k) - 1, {'fixes': [f for f in F if 'find' in f], 'inserts': [f for f in F if 'after' in f]}, frozen)
+        if fl: hard.add(int(k) - 1)
+    hard |= set(bad_pages(pages)) & checked('best')
+    top_plan = {j for i in hard for j in range(i - PROOF_TOP_NEAR, i + PROOF_TOP_NEAR + 1) if j in TP}
+    todo = sorted(top_plan - checked('top'))
+    if todo:
+        update_book(bid, proof={'status': 'running', 'phase': 'top', 'done': len(top_plan) - len(todo), 'total': len(top_plan)})
+        run_round(todo, 'top', 1)
+        if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
     fixed = 0
     with LOCK:                                                              # 之前沒套上的修正再套一次（不用再問 AI）
         pages = read_json(os.path.join(d, 'pages.json')) or []
         frozen = used_pages(read_json(os.path.join(d, 'state.json'), {})); chp = False
-        for kind in ('fast', 'best'):
+        for kind in ('fast', 'best', 'top'):
             fn = os.path.join(d, PROOF_FILES[kind]); rr = read_json(fn, {}) or {}; ch = False
             for k, v in rr.items():
                 F = (v or {}).get('failed') or []

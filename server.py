@@ -877,6 +877,15 @@ def proof_job(bid):
     if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
     # 第 2 輪：Sonnet 抽查（這本書設定成只做第 1 輪就跳過；之後可以再單獨補做）
     if (find_book(load_index(), bid) or {}).get('proofFastOnly'):
+        if (find_book(load_index(), bid) or {}).get('proofFigs'):     # 補做：只用 Sonnet 看有圖片、表格的頁和前後各一頁
+            with LOCK: pages = read_json(os.path.join(d, 'pages.json')) or []
+            figp = {i for i, pg in enumerate(pages) if any(isinstance(x, dict) for x in pg)}
+            fplan = {j for i in figp for j in (i - 1, i, i + 1) if j in TP}
+            todo = sorted(fplan - checked('best'))
+            update_book(bid, proof={'status': 'running', 'phase': 'best', 'done': len(fplan) - len(todo), 'total': len(fplan)})
+            if todo: run_round(todo, 'best', 2)
+            if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
+            update_book(bid, proofFigs=False)
         update_book(bid, proof={'status': 'done', 'done': len(textp), 'total': len(textp), 'rev': int(time.time() * 1000), 'bestPending': True}); return
     lost = read_json(os.path.join(d, 'lost.json'), {}) or {}
     with LOCK: pages = read_json(os.path.join(d, 'pages.json')) or []

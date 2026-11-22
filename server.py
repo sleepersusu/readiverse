@@ -630,13 +630,21 @@ def proof_page(bid, pno, imgdir):
     return {'ok': bool(j.get('ok')) and not failed, 'applied': applied, 'failed': failed, 't': int(time.time())}
 
 
+PROOF_ACTIVE = set()          # 正在校對的書（同一本不會同時跑兩份）
+
+
 def proof_worker():
     while True:
         bid = PROOFQ.get()
+        with LOCK:
+            if bid in PROOF_ACTIVE: continue
+            PROOF_ACTIVE.add(bid)
         try: proof_job(bid)
         except Exception as e:
             import traceback; traceback.print_exc()
             update_book(bid, proof={'status': 'error', 'error': str(e)[:300]})
+        finally:
+            with LOCK: PROOF_ACTIVE.discard(bid)
 
 
 def proof_job(bid):
@@ -1192,7 +1200,7 @@ def main():
     rv_dict.init(lambda: LIB, ai_json)
     threading.Thread(target=parse_worker, daemon=True).start()
     threading.Thread(target=quality_worker, daemon=True).start()
-    threading.Thread(target=proof_worker, daemon=True).start()
+    for _ in range(2): threading.Thread(target=proof_worker, daemon=True).start()   # 兩本書同時校對（每本同時 2 頁）
     threading.Thread(target=docling_setup, daemon=True).start()
     with LOCK:                                   # 上次沒做完的：接著做
         for b in load_index()['books']:

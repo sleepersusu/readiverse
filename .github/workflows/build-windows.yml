@@ -1,0 +1,123 @@
+name: Build Windows installer
+
+# 跟雅思練習室一樣：推上 v* 版號（例如 git tag v1.0.0 && git push --tags）就會在 GitHub 的 Windows 電腦上打包
+# 1. PyInstaller 做成 Readiverse.exe（自己的視窗，用 Windows 內建的 Edge WebView2）
+# 2. 自動測試：打開程式，確認伺服器和網頁都正常
+# 3. Inno Setup 做成安裝程式 Readiverse-Setup.exe，再測一次安裝、解除安裝
+# 4. 發佈到這個倉庫的 Releases（右邊 Releases 下載）
+# 也可以在 Actions → 這個流程 → Run workflow 手動打包（不發佈，打包好的檔案在 Artifacts 下載）
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYTHONUTF8: '1'
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pywebview pywinpty pillow
+
+      - name: Check the code compiles and works on Windows
+        run: |
+          python -c "import ast;[ast.parse(open(f,encoding='utf-8').read()) for f in ['server.py','rv_dict.py','app.py','docling_worker.py']];print('syntax ok')"
+          python -c "import server;print('claude:',server.claude_path());print('storage:',[o['label'] for o in server.storage_options()])"
+
+      - name: Icon
+        run: python -c "from PIL import Image;Image.open('assets/icon.png').save('assets/icon.ico',sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+
+      - name: Build exe
+        run: >
+          python -m PyInstaller --noconfirm --onedir --windowed --name Readiverse --icon assets/icon.ico
+          --add-data "static;static" --add-data "assets;assets" --add-data "docling_worker.py;."
+          --hidden-import server --hidden-import rv_dict --paths .
+          --collect-all webview --collect-all clr_loader --collect-all pythonnet --collect-all winpty --hidden-import clr
+          app.py
+
+      - name: Smoke test (server and pages)
+        shell: pwsh
+        run: |
+          $env:READIVERSE_NO_DOCLING = "1"
+          $env:READIVERSE_LIB = Join-Path $env:RUNNER_TEMP "rv-lib"
+          $p = Start-Process -FilePath "dist/Readiverse/Readiverse.exe" -ArgumentList "--server" -PassThru -WorkingDirectory "dist/Readiverse"
+          $ok = $false
+          for ($i = 0; $i -lt 30; $i++) { Start-Sleep -Seconds 2; try { $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8780/api/caps; $ok = $true; break } catch {} }
+          if (-not $ok) { Write-Output "::error::伺服器沒有啟動"; exit 1 }
+          Write-Output $r.Content
+          $h = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8780/
+          Write-Output ("index " + $h.StatusCode + " " + $h.Content.Length)
+          if ($h.Content -notmatch "Readiverse") { Write-Output "::error::首頁沒有載入"; exit 1 }
+          $l = (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8780/api/library).Content
+          Write-Output $l.Substring(0, [Math]::Min(300, $l.Length))
+          $s = (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8780/api/storage).Content
+          Write-Output $s
+          Stop-Process -Id $p.Id -Force
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          try { Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseTraditional.isl" -OutFile "tools/ChineseTraditional.isl" } catch { Write-Output "沒有繁體中文語言檔，用英文" }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          $v = "${{ github.ref_name }}"; if ($v -notmatch '^v\d') { $v = "v0.0.0" }
+          $env:APP_VERSION = $v.TrimStart("v")
+          & $iscc "tools\installer.iss"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-Item dist/Readiverse-Setup.exe
+
+      - name: Installer test (silent install, run, uninstall)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist/Readiverse-Setup.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER" -PassThru
+          if (-not $p.WaitForExit(300000)) { Write-Output "安裝超過 5 分鐘"; exit 1 }
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\Readiverse\Readiverse.exe"
+          if (-not (Test-Path $exe)) { Write-Output "::error::沒有裝到預期的位置"; exit 1 }
+          Start-Sleep -Seconds 10
+          Get-Process | Where-Object { $_.Path -eq $exe } | Stop-Process -Force -ErrorAction SilentlyContinue
+          $un = Join-Path $env:LOCALAPPDATA "Programs\Readiverse\unins000.exe"
+          $u = Start-Process -FilePath $un -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -PassThru
+          $u.WaitForExit(120000) | Out-Null
+          Write-Output "安裝、解除安裝都正常"
+
+      - name: Upload (manual runs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Readiverse-Setup
+          path: dist/Readiverse-Setup.exe
+
+      - name: Release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          TAG="${{ github.ref_name }}"
+          PREV=$(git tag -l 'v*' --merged "$TAG" --sort=-v:refname | grep -vx "$TAG" | head -1)
+          {
+            echo "## 這一版更新了什麼"; echo
+            git log --no-merges --format='- %s' ${PREV:+$PREV..}"$TAG" | head -60
+            echo; echo "Windows：下載 Readiverse-Setup.exe，點兩下安裝。出現藍色的「Windows 已保護您的電腦」，按「其他資訊 → 仍要執行」。"
+          } > notes.md
+          cat notes.md
+
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Readiverse ${{ github.ref_name }}
+          files: dist/Readiverse-Setup.exe
+          body_path: notes.md

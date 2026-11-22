@@ -20,13 +20,22 @@ import rv_dict
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
+WIN = sys.platform.startswith('win')
+if WIN:                                   # Windows：背景跑的程式（claude、Docling）不要跳出黑色命令視窗
+    class _NoWindowPopen(subprocess.Popen):
+        def __init__(self, *a, **k):
+            k.setdefault('creationflags', 0x08000000)      # CREATE_NO_WINDOW
+            super().__init__(*a, **k)
+    subprocess.Popen = _NoWindowPopen
+
+
 def _fix_path():
     """雙擊 App 打開時，macOS 只給很短的 PATH（找不到 claude、node、uv）：補上使用者登入時的 PATH"""
     if sys.platform.startswith('win'): return
     extra = []
     try:
         sh = os.environ.get('SHELL') or '/bin/zsh'
-        r = subprocess.run([sh, '-lic', 'printf "__P__%s__P__" "$PATH"'], capture_output=True, text=True, timeout=8, stdin=subprocess.DEVNULL)
+        r = subprocess.run([sh, '-lic', 'printf "__P__%s__P__" "$PATH"'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=8, stdin=subprocess.DEVNULL)
         m = re.search(r'__P__(.*?)__P__', r.stdout or '')
         if m: extra += m.group(1).split(':')
     except Exception: pass
@@ -185,15 +194,30 @@ def ai_model(kind='fast'):
 
 
 def claude_path():
+    if WIN:
+        home = os.path.expanduser('~'); appdata = os.environ.get('APPDATA') or os.path.join(home, 'AppData', 'Roaming')
+        for c in (os.path.join(home, '.local', 'bin', 'claude.exe'), shutil.which('claude.exe'),
+                  shutil.which('claude'), os.path.join(appdata, 'npm', 'claude.cmd')):
+            if c and os.path.exists(c): return c
+        return None
     c = shutil.which('claude') or os.path.expanduser('~/.local/bin/claude')
     return c if os.path.exists(c) else None
+
+
+def claude_argv(c):
+    """執行 claude 用的開頭。Windows 上 npm 裝的是 claude.cmd：改成 node cli.js，參數才不會被 cmd.exe 改掉"""
+    if WIN and c and c.lower().endswith('.cmd'):
+        js = os.path.join(os.path.dirname(c), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js')
+        node = shutil.which('node') or os.path.join(os.path.dirname(c), 'node.exe')
+        if os.path.exists(js) and node and os.path.exists(node): return [node, js]
+    return [c]
 
 
 def ai_cmds(prompt, model=None):
     """只用 Claude（電腦上登入的 Claude Code）"""
     claude = claude_path()
     if not claude: return []
-    return [('Claude Code', [claude, '-p', '--model', model or ai_model('fast'), prompt])]
+    return [('Claude Code', [*claude_argv(claude), '-p', '--model', model or ai_model('fast'), prompt])]
 
 
 def ai_auth():
@@ -201,7 +225,7 @@ def ai_auth():
     c = claude_path()
     if not c: return {'installed': False, 'loggedIn': False}
     try:
-        r = subprocess.run([c, 'auth', 'status', '--json'], capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL)
+        r = subprocess.run([*claude_argv(c), 'auth', 'status', '--json'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=20, stdin=subprocess.DEVNULL)
         j = json.loads(r.stdout or '{}')
     except Exception: j = {}
     return {'installed': True, 'loggedIn': bool(j.get('loggedIn')), 'expires': j.get('loginExpiresAt') or '', 'method': j.get('authMethod') or ''}
@@ -210,51 +234,78 @@ def ai_auth():
 LOGIN = {'state': '', 'url': '', 'error': '', 'out': '', 'fd': None, 'proc': None}
 
 
+class _Term:
+    """看不見的終端機（claude auth login 要在終端機裡跑）：Mac/Linux 用 pty，Windows 用 pywinpty"""
+    def __init__(self, argv):
+        if WIN:
+            from winpty import PtyProcess
+            self.w = PtyProcess.spawn(argv, dimensions=(40, 200)); self.fd = None
+        else:
+            import pty
+            m, s_ = pty.openpty()
+            self.p = subprocess.Popen(argv, stdin=s_, stdout=s_, stderr=s_, close_fds=True, start_new_session=True)
+            os.close(s_); self.fd = m
+    def read(self):
+        if WIN:
+            try: return self.w.read(4096).encode('utf-8', 'ignore')
+            except EOFError: raise OSError('closed')
+        import select
+        r, _, _ = select.select([self.fd], [], [], 0.5)
+        return os.read(self.fd, 4096) if r else b''
+    def write(self, txt):
+        if WIN: self.w.write(txt)
+        else: os.write(self.fd, txt.encode())
+    def alive(self):
+        return self.w.isalive() if WIN else self.p.poll() is None
+    def kill(self):
+        try:
+            if WIN: self.w.terminate(force=True)
+            else: os.killpg(self.p.pid, 15)
+        except Exception: pass
+        try:
+            if self.fd is not None: os.close(self.fd)
+        except OSError: pass
+
+
 def login_start():
     """在背景跑 claude auth login（看不見的終端機）：它會自己打開瀏覽器的授權頁；網址也抓下來，App 裡可以再按一次打開"""
     c = claude_path()
     if not c: return {'state': 'error', 'error': '這台電腦沒有 Claude Code'}
     login_stop()
-    import pty, select
-    m, s_ = pty.openpty()
-    p = subprocess.Popen([c, 'auth', 'login'], stdin=s_, stdout=s_, stderr=s_, close_fds=True, start_new_session=True)
-    os.close(s_)
-    LOGIN.update(state='waiting', url='', error='', out='', fd=m, proc=p)
+    try: t = _Term(claude_argv(c) + ['auth', 'login'])
+    except Exception as e: return {'state': 'error', 'error': '沒辦法開始登入：%s' % e, 'url': ''}
+    LOGIN.update(state='waiting', url='', error='', out='', term=t)
     def pump():
         buf = b''
-        while LOGIN['proc'] is p:
-            try:
-                r, _, _ = select.select([m], [], [], 0.5)
-                if r: buf += os.read(m, 4096)
+        while LOGIN.get('term') is t:
+            try: buf += t.read()
             except OSError: break
             txt = re.sub(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]|\x1b8;;[^\x1b]*\x1b', '', buf.decode('utf-8', 'ignore'))
             LOGIN['out'] = txt[-2000:]
             u = re.findall(r'https://[^\s\x1b\x07\]]+', buf.decode('utf-8', 'ignore'))
             if u and not LOGIN['url']: LOGIN['url'] = u[0]
             if 'Login successful' in txt or 'successfully' in txt.lower(): LOGIN['state'] = 'done'; break
-            if p.poll() is not None:
+            if not t.alive():
                 if LOGIN['state'] == 'waiting': LOGIN.update(state='error', error=(txt.strip().splitlines() or ['登入失敗'])[-1][:200])
                 break
-        try: os.close(m)
-        except OSError: pass
+            if WIN: time.sleep(0.2)
     threading.Thread(target=pump, daemon=True).start()
     return login_state()
 
 
 def login_code(code):
     """授權頁給了一串代碼：貼回登入程式"""
-    if LOGIN.get('fd') is None or LOGIN['state'] != 'waiting': return login_state()
-    try: os.write(LOGIN['fd'], (str(code).strip() + '\r').encode())
-    except OSError as e: LOGIN.update(state='error', error=str(e))
+    t = LOGIN.get('term')
+    if not t or LOGIN['state'] != 'waiting': return login_state()
+    try: t.write(str(code).strip() + '\r')
+    except Exception as e: LOGIN.update(state='error', error=str(e))
     return login_state()
 
 
 def login_stop():
-    p = LOGIN.get('proc')
-    if p and p.poll() is None:
-        try: os.killpg(p.pid, 15)
-        except Exception: pass
-    LOGIN.update(proc=None, fd=None)
+    t = LOGIN.get('term')
+    if t: t.kill()
+    LOGIN.update(term=None)
 
 
 def login_state():
@@ -269,7 +320,7 @@ def ai_test():
     for kind in ('fast', 'best'):
         m = ai_model(kind); t = time.time()
         try:
-            r = subprocess.run([c, '-p', '--model', m, 'Reply with exactly: OK'], capture_output=True, text=True, timeout=90, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
+            r = subprocess.run([*claude_argv(c), '-p', '--model', m, 'Reply with exactly: OK'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=90, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
             msg = ((r.stdout or '') + (r.stderr or '')).strip()
             ok = r.returncode == 0 and 'OK' in (r.stdout or '')
         except subprocess.TimeoutExpired:
@@ -287,7 +338,7 @@ def ai_json(prompt, want=list, timeout=300, kind='fast'):
     errs = []
     for name, cmd in cmds:
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
+            r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
         except subprocess.TimeoutExpired:
             errs.append('%s 超過 %d 秒沒回應' % (name, timeout)); continue
         out = (r.stdout or '').strip()
@@ -617,8 +668,8 @@ def proof_page(bid, pno, imgdir):
     payload = json.dumps({'prev_tail': prev[-200:], 'paras': {str(i): t for i, t in enumerate(paras)}}, ensure_ascii=False)
     c = claude_path()
     if not c: raise RuntimeError('找不到 Claude Code')
-    r = subprocess.run([c, '-p', '--model', ai_model('best'), '--allowedTools', 'Read', '--add-dir', imgdir, '--', PROOF_PROMPT % (img, payload)],
-                       capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
+    r = subprocess.run([*claude_argv(c), '-p', '--model', ai_model('best'), '--allowedTools', 'Read', '--add-dir', imgdir, '--', PROOF_PROMPT % (img, payload)],
+                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
     m = re.search(r'\{[\s\S]*\}', r.stdout or '')
     if r.returncode != 0 or not m:
         err = ((r.stderr or r.stdout or '').strip().splitlines() or ['沒有回應'])[-1][:200]
@@ -651,30 +702,54 @@ def proof_worker():
             with LOCK: PROOF_ACTIVE.discard(bid)
 
 
+PROOF_EVERY = 5      # 抽樣：每 5 頁校對 1 頁；有問題的頁再往前後各 2 頁檢查
+PROOF_NEAR = 2
+
+
 def proof_job(bid):
+    """AI 校對（抽樣）：
+    1. 每 5 頁抽 1 頁，加上程式覺得可疑的頁（辨識到的字沒出現在段落裡、亂碼分數高）
+    2. 抽到的頁有修正（或修不了的地方），就把前後各 2 頁也校對
+    已經校對過的頁不會重做（關掉 App 再開會接著做）"""
     from concurrent.futures import ThreadPoolExecutor
     d = os.path.join(LIB, bid)
     with LOCK:
         pages = read_json(os.path.join(d, 'pages.json')) or []
-    rec = read_json(os.path.join(d, 'proof.json'), {}) or {}
-    todo = [i for i, pg in enumerate(pages) if any(is_text(x) for x in pg) and not (rec.get(str(i + 1)) or {}).get('t')]
-    total = sum(1 for pg in pages if any(is_text(x) for x in pg)); done = total - len(todo)
-    update_book(bid, proof={'status': 'running', 'done': done, 'total': total})
-    imgdir = render_pages(bid, [i + 1 for i in todo])
+    textp = [i for i, pg in enumerate(pages) if any(is_text(x) for x in pg)]
+    if not textp: update_book(bid, proof={'status': 'done', 'done': 0, 'total': 0, 'fixed': 0}); return
+    TP = set(textp)
+    lost = read_json(os.path.join(d, 'lost.json'), {}) or {}
+    flagged = {int(k) - 1 for k in lost if str(k).isdigit()} | set(bad_pages(pages))
+    seeds = set(textp[::PROOF_EVERY]) | (flagged & TP); plan = set(seeds)
+    checked = lambda: {int(k) - 1 for k, v in (read_json(os.path.join(d, 'proof.json'), {}) or {}).items() if (v or {}).get('t')}
+    def issues(v): return bool([a for a in (v or {}).get('applied') or [] if not a.get('already')] or (v or {}).get('failed'))
     stop = [None]
-    def one(i):
-        if stop[0]: return
-        try: r = proof_page(bid, i, imgdir)
-        except RuntimeError as e: stop[0] = str(e); return
-        if r is None: return
-        with LOCK:
-            rr = read_json(os.path.join(d, 'proof.json'), {}) or {}; rr[str(i + 1)] = r; write_json(os.path.join(d, 'proof.json'), rr)
-            b = find_book(load_index(), bid); pr = dict((b or {}).get('proof') or {})
-            pr['done'] = pr.get('done', 0) + 1; pr['rev'] = int(time.time() * 1000)
-            update_book(bid, proof=pr)
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        list(ex.map(one, todo))
-    if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300], 'done': done, 'total': total}); return
+    def run_round(todo):
+        imgdir = render_pages(bid, [i + 1 for i in todo])
+        def one(i):
+            if stop[0]: return
+            try: r = proof_page(bid, i, imgdir)
+            except RuntimeError as e: stop[0] = str(e); return
+            if r is None: return
+            with LOCK:
+                rr = read_json(os.path.join(d, 'proof.json'), {}) or {}; rr[str(i + 1)] = r; write_json(os.path.join(d, 'proof.json'), rr)
+                b = find_book(load_index(), bid); pr = dict((b or {}).get('proof') or {})
+                pr['done'] = pr.get('done', 0) + 1; pr['rev'] = int(time.time() * 1000)
+                update_book(bid, proof=pr)
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            list(ex.map(one, sorted(todo)))
+    while True:
+        rr = read_json(os.path.join(d, 'proof.json'), {}) or {}
+        done_set = checked()
+        for k, v in rr.items():                                         # 有問題的頁：前後各 2 頁也要看
+            if str(k).isdigit() and int(k) - 1 in seeds and issues(v):        # 只從抽樣的頁往外擴（不會一路擴到整本）
+                i = int(k) - 1; plan |= {j for j in range(i - PROOF_NEAR, i + PROOF_NEAR + 1) if j in TP}
+        todo = sorted(plan - done_set)
+        update_book(bid, proof={'status': 'running', 'done': len(plan & done_set), 'total': len(plan), 'sampled': True})
+        if not todo or stop[0]: break
+        run_round(todo)
+    total = len(plan)
+    if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300], 'done': len(plan & checked()), 'total': total}); return
     with LOCK:                                                              # 之前沒套上的修正再套一次（不用再問 AI）
         rr = read_json(os.path.join(d, 'proof.json'), {}) or {}
         pages = read_json(os.path.join(d, 'pages.json')) or []
@@ -699,10 +774,16 @@ DOCLING = {'status': 'checking', 'error': ''}      # checking / installing / rea
 DOCLING_READY = threading.Event()
 
 
-def _find_uv():
-    for c in (shutil.which('uv'), os.path.expanduser('~/.local/bin/uv'), os.path.expanduser('~/.cargo/bin/uv'), '/opt/homebrew/bin/uv'):
+def _find_uv(install=False):
+    ext = '.exe' if WIN else ''
+    for c in (shutil.which('uv'), os.path.expanduser('~/.local/bin/uv' + ext), os.path.expanduser('~/.cargo/bin/uv' + ext), '/opt/homebrew/bin/uv'):
         if c and os.path.exists(c): return c
-    return None
+    if not install: return None
+    try:                                  # 沒有 uv：用官方的安裝程式裝（裝在使用者自己的資料夾，不用管理員權限）
+        if WIN: subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'irm https://astral.sh/uv/install.ps1 | iex'], capture_output=True, timeout=600)
+        else: subprocess.run(['sh', '-c', 'curl -LsSf https://astral.sh/uv/install.sh | sh'], capture_output=True, timeout=600)
+    except Exception: pass
+    return _find_uv(False)
 
 
 def _find_py310():
@@ -711,7 +792,7 @@ def _find_py310():
     for c in cands:
         if not c or not os.path.exists(c): continue
         try:
-            v = subprocess.run([c, '-c', 'import sys;print(sys.version_info[:2]>=(3,10))'], capture_output=True, text=True, timeout=20).stdout.strip()
+            v = subprocess.run([c, '-c', 'import sys;print(sys.version_info[:2]>=(3,10))'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=20).stdout.strip()
             if v == 'True': return c
         except Exception: pass
     return None
@@ -735,7 +816,7 @@ def docling_setup(force=False):
     log = open(os.path.join(HOME_DIR, 'docling-install.log'), 'a', encoding='utf-8')
     DOCLING.update(status='installing', error='')
     try:
-        uv = _find_uv()
+        uv = _find_uv(install=True)
         if uv:
             cmds = [[uv, 'venv', '-q', '--allow-existing', '-p', '3.12', VENV], [uv, 'pip', 'install', '-q', '-p', VPY] + PKGS]
         else:

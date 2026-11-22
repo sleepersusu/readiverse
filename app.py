@@ -49,6 +49,9 @@ def browser_mode():
     run_server(True)
 
 
+if '--server' in sys.argv:                  # 只開伺服器、不開視窗（打包後的自動測試用）
+    run_server(False); sys.exit(0)
+
 try:
     if '--browser' in sys.argv: raise ImportError('browser')
     import webview

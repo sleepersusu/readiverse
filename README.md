@@ -74,3 +74,22 @@ AI 只用你電腦上已經登入的 **Claude Code**（`claude`）。沒有登�
   <id>/state.json        螢光筆、筆記、中文翻譯
   _單字收藏.json / _句子收藏.json / _字典快取.json   字典和收藏
 ```
+
+## Windows 版
+
+跟雅思練習室一樣用 GitHub Actions 打包（`.github/workflows/build-windows.yml`）：
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+推上 `v*` 版號後，GitHub 的 Windows 電腦會：PyInstaller 打包成 `Readiverse.exe` → 自動測試 → Inno Setup 做成 `Readiverse-Setup.exe` → 測安裝／解除安裝 → 發佈到這個倉庫的 Releases。
+
+- 安裝在「使用者\AppData\Local\Programs\Readiverse」，不用管理員權限；書庫在「使用者\Readiverse書庫」或設定裡選的 Google 雲端硬碟／OneDrive，更新、解除安裝都不會動到。
+- AI 用 Windows 上的 Claude Code（`claude.exe` 或 npm 裝的 `claude.cmd` 都可以），設定裡一樣可以直接登入（用 pywinpty）。
+- 版面解析：第一次用時自動裝 uv 和 Docling；掃描書在 Windows 用 Docling 內建的 OCR（Mac 用 Apple Vision）。
+- 從原始碼執行：雙擊 `開啟Readiverse.bat`。
+
+## AI 校對（抽樣）
+
+每 5 頁抽 1 頁給 Claude 對照原書校對，加上程式覺得可疑的頁（漏字、亂碼）；抽到的頁有修正，就把前後各 2 頁也校對。

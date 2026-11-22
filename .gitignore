@@ -1,0 +1,6 @@
+書庫/
+__pycache__/
+.DS_Store
+*.tmp
+static/_test*.pdf
+.claude/

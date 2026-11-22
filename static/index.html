@@ -315,10 +315,10 @@ mark.hl.lit{box-shadow:0 0 0 2px var(--ink)}
 @media (prefers-color-scheme:dark){:root[data-theme="system"]{--vw:#4fd1bd;--ph:#a99cff}}
 .vw{text-decoration:underline;text-decoration-color:var(--vw);text-decoration-thickness:2.5px;text-underline-offset:5px;text-decoration-skip-ink:none;cursor:pointer}
 .vw{white-space:nowrap}
-.vw.last::after{content:"◆";display:inline-block;position:absolute;right:-.55em;top:-.15em;line-height:1;text-indent:0;text-decoration:none;font-size:.45em;color:var(--vw);vertical-align:super;margin-left:2px;font-family:sans-serif}
+.vw.last::after{content:"◆";display:inline-block;position:absolute;right:-.62em;top:-.2em;line-height:1;text-indent:0;text-decoration:none;font-size:.45em;color:var(--vw);vertical-align:super;margin-left:2px;font-family:sans-serif}
 .vw:hover{background:color-mix(in srgb,var(--vw) 12%,transparent);border-radius:3px}
 .ph{text-decoration:underline;text-decoration-skip-ink:none;text-decoration-color:var(--ph);text-decoration-thickness:2.5px;text-underline-offset:4px;cursor:pointer}
-.ph.last::after{content:"✦";display:inline-block;position:absolute;right:-.55em;top:-.15em;line-height:1;text-indent:0;text-decoration:none;font-size:.62em;color:var(--ph);vertical-align:super;margin-left:1px;font-family:sans-serif}
+.ph.last::after{content:"✦";display:inline-block;position:absolute;right:-.62em;top:-.2em;line-height:1;text-indent:0;text-decoration:none;font-size:.62em;color:var(--ph);vertical-align:super;margin-left:1px;font-family:sans-serif}
 .ph:hover{background:color-mix(in srgb,var(--ph) 12%,transparent);border-radius:3px}
 /* 小卡片（點底線） */
 .wcard{position:fixed;z-index:40;width:min(380px,calc(100vw - 24px));max-height:min(70vh,560px);overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 36px rgba(0,0,0,.18);padding:14px 16px;display:flex;flex-direction:column;gap:10px;font-size:14px}
@@ -448,7 +448,15 @@ dialog.setdlg form{display:flex;flex-direction:column;max-height:min(86vh,860px)
 .sw-toggle input:checked+span::after{transform:translateX(18px)}
 .sw-toggle input:focus-visible+span{outline:2px solid var(--ink);outline-offset:2px}
 @media (max-width:560px){.srow{flex-direction:column;align-items:stretch;gap:6px}.sc select,.sc input[type=text]{width:100%}}
-.vw.last,.ph.last{position:relative;margin-right:.5em}
+.vw.last,.ph.last{position:relative;margin-right:.12em}
+/* ---------- 章節頁、章節標籤 ---------- */
+.para.dv1{margin-top:min(22vh,190px)!important}
+.para.dvl,.para.dvt{max-width:none;text-align:center;margin-left:auto;margin-right:auto}
+.para.dvl .ptx,.para.dvt .ptx{text-indent:0!important;text-align:center}
+.para.dvl .ptx{text-transform:uppercase;letter-spacing:.32em;font-size:calc(var(--fs)*1.25);font-weight:500;color:var(--pink);margin-bottom:.5em}
+.para.dvt .ptx{font-size:calc(var(--fs)*2.1);line-height:1.2;font-weight:500;letter-spacing:.01em}
+.para.lbl{text-align:center;margin:1.6em auto .1em!important}
+.para.lbl .ptx{text-indent:0!important;text-align:center;text-transform:uppercase;letter-spacing:.28em;font-weight:500!important;font-size:calc(var(--fs)*.95)!important;color:var(--pink)}
 </style></head>
 <body>
 <div class="top">
@@ -885,14 +893,29 @@ async function loadPdf(){
   if(!window.pdfjsLib||!BOOK) return; const id=BOOK.meta.id;
   try{ const pdf=await pdfjsLib.getDocument(`/books/${id}/book.pdf`).promise; if(!BOOK||BOOK.meta.id!==id) return pdf.destroy(); PDF=pdf;
     if(MODE==='pdf') renderPdfPage();
-    const ol=await pdf.getOutline(); if(ol&&ol.length) buildToc(ol); }catch(e){ console.warn('pdf',e); } }
+    const ol=await pdf.getOutline(); if(ol&&ol.length&&await buildToc(ol)) return; textToc(); }catch(e){ console.warn('pdf',e); textToc(); } }
+function textToc(){
+  // 從內文找章節：章節頁、每頁開頭的 Part/Chapter/Section 標籤（後面接的標題一起顯示）
+  if(!BOOK) return; const out=[];
+  BOOK.pages.forEach((pg,i)=>{ const T=(pg||[]).filter(isTxt); if(!T.length) return;
+    const div=isDivider(pg), lab=isLabel(T[0]);
+    if(!div&&!lab) return;
+    let t=T[0].trim(); if(T[1]&&isHead(T[1])&&T[1].length<=70) t+=(lab?' — ':' ')+T[1].trim();
+    const d=/^(part|volume|book|act)\b/i.test(t)?0:1;
+    const last=out[out.length-1]; if(last&&last.pg===i-1&&div&&!lab&&last.div){ last.t+=' — '+t; return; }   // Part 1 的下一頁是標題頁：接在一起
+    out.push({t,d,pg:i,div}); });
+  if(out.length<2) return;
+  const md=Math.min(...out.map(o=>o.d)); out.forEach(o=>o.d-=md);
+  $('toc').innerHTML=out.map(o=>`<button type="button" data-go="${o.pg}" style="padding-left:${8+o.d*14}px"><span class="pn">${o.pg+1}</span>${esc(o.t)}</button>`).join('');
+  $('tocBtn').hidden=false; }
 async function buildToc(ol){
   const out=[]; const walk=async(items,d)=>{ for(const it of items){ let pg=null;
     try{ const dest=typeof it.dest==='string'?await PDF.getDestination(it.dest):it.dest; if(dest&&dest[0]) pg=await PDF.getPageIndex(dest[0]); }catch(e){}
     out.push({t:it.title,d,pg}); if(it.items&&it.items.length&&d<2) await walk(it.items,d+1); } };
   await walk(ol,0);
+  if(out.filter(o=>o.pg!=null).length<2) return false;     // 書籤壞掉（沒有頁碼）：改用內文的章節
   $('toc').innerHTML=out.map(o=>`<button type="button" ${o.pg!=null?`data-go="${o.pg}"`:'disabled'} style="padding-left:${8+o.d*14}px">${o.pg!=null?`<span class="pn">${o.pg+1}</span>`:''}${esc(o.t)}</button>`).join('');
-  $('tocBtn').hidden=false; }
+  $('tocBtn').hidden=false; return true; }
 $('tocBtn').onclick=e=>{ e.stopPropagation(); $('toc').hidden=!$('toc').hidden; };
 $('toc').onclick=e=>{ const b=e.target.closest('[data-go]'); if(b){ $('toc').hidden=true; showPage(+b.dataset.go); } };
 document.addEventListener('click',e=>{ if(!e.target.closest('#toc,#tocBtn')) $('toc').hidden=true; });
@@ -999,18 +1022,24 @@ const SMALLW=new Set('a an the and or of to in on at for with from by as but nor
 const isHead=t=>{ if(typeof t!=='string') return false; t=t.trim(); if(t.length>70||/[.!?;:,]["”’)]?$/.test(t)||!/^[A-Z0-9"“‘(]/.test(t)) return false;
   const ws=t.split(/\s+/); if(ws.length>10) return false; if(t===t.toUpperCase()) return true;
   const big=ws.filter(w=>!SMALLW.has(w.toLowerCase())); return big.length>0&&big.filter(w=>/^[A-Z0-9"“‘(]/.test(w)).length/big.length>=0.7; };   // 章名：大部分的字大寫開頭
+// 章節標籤（Part 1、Chapter IV、Section 2、Volume I、Book One…）：小型大寫、字距拉開，像書的章節頁
+const NUMW='one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth';
+const LABEL_RE=new RegExp(`^(part|chapter|section|volume|book|unit|lesson|act|appendix)\\s+([0-9]+|[ivxlcdm]+|[a-z]|${NUMW})\\.?$`,'i');
+const isLabel=t=>typeof t==='string'&&LABEL_RE.test(t.trim());
+// 整頁只有一兩行標題（像 Part 1 的扉頁）：當成「章節頁」，置中放大
+const isDivider=P=>{ const T=P.filter(isTxt); return T.length>0&&T.length<=3&&P.length===T.length&&T.every(t=>isLabel(t)||isHead(t))&&T.join(' ').length<=90; };
 function renderPage(){
   const P=paras(PG), sh=$('sheet'), n=nPages(); let tn=0;
   const subHead=(t,i)=>isTxt(t)&&isTxt(P[i+1])&&t.trim().length<=60&&t.trim().split(/\s+/).length<=9&&/^[A-Z0-9"“]/.test(t.trim())&&!/[.!?;:,"”’)]$/.test(t.trim());   // 小標題：很短、沒有句尾標點、後面接一段
   const kind=P.map((t,i)=>{ if(!isTxt(t)) return ''; if(isHead(t)||subHead(t,i)) return 'hd'; const pv=P[i-1];
     if(i===0) return 'noind'; if(!isTxt(pv)) return 'noind'; if(isHead(pv)||subHead(pv,i-1)) return (isHead(pv)&&t.length>180&&/^[A-Z]/.test(t)?'cap ':'')+'noind'; return ''; });
-  const used=pageUsed(PG), aiBusy=AIPG[PG];
+  const used=pageUsed(PG), aiBusy=AIPG[PG], DIV=isDivider(P);
   const cards=cardsOfPage(PG).filter(o=>o.nid&&ST.notes[o.nid]), byPara={}; cards.forEach(o=>(byPara[o.i]=byPara[o.i]||[]).push(o));
   const pn=ST.pageNotes[PG];
   let h=`<div class="gut" role="separator" aria-orientation="vertical" aria-label="拖曳調整左右寬度" tabindex="0"></div>
     <div class="r2 rhead"><div class="L"><div class="ptop"><span class="runhead" title="${esc(BOOK.meta.title)}">${esc(String(BOOK.meta.title).split(/[:：]/)[0])}</span>${AIPG_ERR[PG]?`<span class="err" style="margin-left:8px">${esc(AIPG_ERR[PG])}</span>`:''}<span class="grow"></span>${pgNav(n,1)}</div></div><div class="R"><textarea id="pgNote" rows="1" placeholder="這一頁的筆記…" aria-label="這一頁的筆記">${esc(pn||'')}</textarea></div></div>`;
   if(!P.length) h+=`<div class="r2"><div class="L"><div class="notext">${BOOK.meta.hasText?'這一頁沒有文字（可能是圖片或空白頁）。':'這本 PDF 是掃描圖片，抽不出文字。'}<br><button type="button" class="small" style="margin-top:10px" data-mode-go="pdf">看原始頁面</button></div></div><div class="R"></div></div>`;
-  else h+=P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div><div class="R"></div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${kind[i].includes('hd')?' hd':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div>
+  else h+=P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div><div class="R"></div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${DIV?(isLabel(t)?' dvl':' dvt'):''}${DIV&&i===0?' dv1':''}${!DIV&&isLabel(t)?' lbl':''}${kind[i].includes('hd')?' hd':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div>
     <div class="R">${(byPara[i]||[]).map(o=>cardHtml(o)).join('')}${paraNoteHtml(PG,i)}</div></div>`).join('');
   h+=`<div class="r2 rf"><div class="L"><div class="rfoot">${pgNav(n)}</div></div><div class="R"></div></div>`;
   sh.innerHTML=h; sh.querySelectorAll('textarea').forEach(autoGrow); paginate();

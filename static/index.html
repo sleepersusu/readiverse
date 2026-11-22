@@ -245,11 +245,12 @@ mark.hl.lit{box-shadow:0 0 0 2px var(--ink)}
 .addn{align-self:flex-start;opacity:0;transition:opacity .12s;border:1px dashed var(--line);background:none;color:var(--muted);font-size:12px;min-height:26px;padding:2px 9px}
 .r2.hov .addn,.addn:focus-visible{opacity:1}
 @media (hover:none){.addn{opacity:.7}}
-.fig{margin:10px auto 14px;max-width:860px;display:flex;flex-direction:column;gap:6px}
-.fig img{max-width:100%;max-height:calc(100vh - 300px);width:auto;height:auto;object-fit:contain;align-self:center;border-radius:6px;cursor:zoom-in;background:#fff;border:1px solid var(--line)}
+.fig{margin:10px auto 14px;max-width:860px;font-size:16px;display:flex;flex-direction:column;gap:6px}
+.fig img{max-width:100%;height:auto;object-fit:contain;align-self:center;border-radius:6px;cursor:zoom-in;background:#fff;border:1px solid var(--line)}
 .fig figcaption{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;justify-content:center;text-align:center}
 .tblw{overflow-x:auto}
-.tbl{border-collapse:collapse;margin:0 auto;font-family:var(--f-read);font-size:calc(var(--fs) - 3px)}
+.tblsw{min-height:24px;padding:1px 9px;font-size:11.5px;margin-left:8px}
+.tbl{border-collapse:collapse;margin:0 auto;font-family:var(--f-read);font-size:15px}
 .tbl th,.tbl td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
 .tbl th{background:var(--soft);font-weight:600}
 .aipg{width:28px;height:28px;margin-left:8px;color:var(--muted)}
@@ -883,10 +884,12 @@ function zhHtml(i){ if(!ZH) return ''; const Z=ST.zh[PG];
   if(i===0&&TR_ERR[PG]) return `<div class="zh err">${esc(TR_ERR[PG])} <button type="button" class="small" data-retr>再試一次</button></div>`;
   return ''; }
 const isTxt=x=>typeof x==='string';
-function figHtml(x,i){ const src=`/books/${BOOK.meta.id}/figs/${encodeURIComponent(x.src)}`, tab=x.t==='table'&&x.rows&&x.rows.length, mode=LS.get('tblImg',false);
+function figHtml(x,i){ const src=`/books/${BOOK.meta.id}/figs/${encodeURIComponent(x.src)}`, tab=x.t==='table'&&x.rows&&x.rows.length, asText=tab&&LS.get('tblText',false);
+  // 表格預設顯示原始截圖（跟書上一模一樣）；按「文字版」可以選取、複製
   const table=tab?`<div class="tblw"><table class="tbl">${x.rows.map((r,j)=>`<tr>${r.map(c=>j===0?`<th>${esc(c)}</th>`:`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table></div>`:'';
-  return `<figure class="fig" id="en${i}">${tab&&!mode?table:`<img src="${src}" alt="${esc(x.cap||'圖')}" loading="lazy" data-zoom="${src}" style="aspect-ratio:${x.w||4}/${x.h||3}">`}
-    <figcaption>${x.cap?esc(x.cap):''}${tab?`<button type="button" class="ib ghost" data-tblmode title="${mode?'顯示成表格（可以選取文字）':'顯示原始截圖'}" aria-label="切換表格／截圖">${mode?'▦':'🖼'}</button>`:''}</figcaption></figure>`; }
+  const w=Math.round((x.w||800)/2);       // 截圖是 2 倍解析度
+  return `<figure class="fig" id="en${i}">${asText?table:`<img src="${src}" alt="${esc(x.cap||'圖')}" data-zoom="${src}" data-w="${x.w||800}" data-h="${x.h||600}" style="width:min(100%,${w}px);aspect-ratio:${x.w||4}/${x.h||3}">`}
+    <figcaption>${x.cap?`<span>${esc(x.cap)}</span>`:''}${tab?`<button type="button" class="small tblsw" data-tblmode title="${asText?'改回書上的原始截圖':'改成文字版表格（可以選取、複製）'}">${asText?'原圖':'文字版'}</button>`:''}</figcaption></figure>`; }
 function pgNav(n,top){
   const prev=`<button type="button" class="pgbtn" data-turn="-1"${PG<=0?' disabled':''} title="上一頁（←）" aria-label="Previous page"><svg class="i" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg><span>Previous</span></button>`;
   const next=`<button type="button" class="pgbtn" data-turn="1"${PG>=n-1?' disabled':''} title="下一頁（→）" aria-label="Next page"><span>Next</span><svg class="i" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>`;
@@ -911,6 +914,7 @@ function renderPage(){
     <div class="R">${(byPara[i]||[]).map(o=>cardHtml(o)).join('')}${paraNoteHtml(PG,i)}</div></div>`).join('');
   h+=`<div class="r2 rf"><div class="L"><div class="rfoot">${pgNav(n)}</div></div><div class="R"></div></div>`;
   sh.innerHTML=h; sh.querySelectorAll('textarea').forEach(autoGrow); paginate();
+  sh.querySelectorAll('.fig img').forEach(im=>{ if(!im.complete) im.addEventListener('load',()=>{ if(BOOK&&!$('vRead').hidden) paginate(firstShown()); },{once:true}); });
   const ab=$('aiPgBtn'), bad=(BOOK.meta.ocrBad||[]).includes(PG); ab.hidden=!P.some(isTxt); ab.disabled=!!(used||aiBusy); ab.classList.toggle('warn',bad&&!used); ab.classList.toggle('busy',!!aiBusy);
   ab.title=used?'這一頁已經有螢光筆、筆記或翻譯，不能再用 AI 整理':aiBusy?'AI 整理中…':bad?'⚠ 這頁可能有辨識錯字：按一下用 AI 修正':'用 AI 整理這一頁（重新分段、修正 OCR 錯字）';
 }
@@ -933,12 +937,25 @@ function paginate(keep){
   if(keep===undefined&&RESTORE!=null){ keep=rows.find(r=>(r.dataset.i||r.dataset.fi)==RESTORE); RESTORE=null; }
   if((!keep||!rows.includes(keep))&&ANCHOR&&ANCHOR.pg===PG&&ANCHOR.book===(BOOK&&BOOK.meta.id)&&!SUB_END) keep=rows.find(r=>(r.dataset.i||r.dataset.fi)==ANCHOR.i);
   // 每一段變成一個或好幾個「片段」：放得下就是整段；太長的段落在行與行之間切開，後半段接到下一個畫面（不用上下捲）
-  const U=[]; rows.forEach(r=>{ const H=r.offsetHeight; if(H<=avail){ U.push({r,off:0,h:H}); return; }
+  // 圖、表格：自己一個畫面，整張縮放到剛好放得下（不跟著文字大小變）
+  rows.forEach(r=>{ const f=r.querySelector(':scope>.L>.fig'); if(!f) return; f.style.zoom=''; f.style.marginTop='';
+    const im=f.querySelector('img'), cap=f.querySelector('figcaption'), ch=(cap?cap.offsetHeight:0)+28;
+    if(im){ const iw=+im.dataset.w||800, ih=+im.dataset.h||600, colW=f.clientWidth||600;
+      const tw=Math.max(120,Math.min(colW,(avail-ch)*iw/ih,iw));                      // 放大到剛好填滿畫面（最多原始解析度）
+      im.style.width=tw+'px'; im.style.maxHeight='none';
+      f.style.marginTop=Math.max(10,(avail-(tw*ih/iw)-ch)/2)+'px'; }                   // 上下置中
+    else { const H=r.offsetHeight; if(H>avail) f.style.zoom=Math.max(0.3,(avail-8)/H); } });
+  const U=[]; rows.forEach(r=>{ const H=r.offsetHeight; if(H<=avail||r.querySelector(':scope>.L>.fig')){ U.push({r,off:0,h:Math.min(H,avail)}); return; }
     const pt=r.querySelector('.ptx'), lh=pt?parseFloat(getComputedStyle(pt).lineHeight)||28:28, sl=Math.max(lh,Math.floor((avail-8)/lh)*lh);
     for(let o=0;o<H;o+=sl) U.push({r,off:o,h:Math.min(sl,H-o),cut:true}); });
   const atR=Math.max(0,rows.indexOf(keep)), at=Math.max(0,U.findIndex(u=>u.r===rows[atR]));
-  const fwd=from=>{ const G=[]; let cur=[],h=0; for(let k=from;k<U.length;k++){ if(cur.length&&h+U[k].h>avail){ G.push(cur); cur=[]; h=0; } cur.push(U[k]); h+=U[k].h; } if(cur.length) G.push(cur); return G; };
-  const back=[]; { let cur=[],h=0; for(let k=at-1;k>=0;k--){ if(cur.length&&h+U[k].h>avail){ back.unshift(cur); cur=[]; h=0; } cur.unshift(U[k]); h+=U[k].h; } if(cur.length) back.unshift(cur); }
+  U.forEach(u=>{ u.fig=!!u.r.querySelector(':scope>.L>.fig'); });
+  const fwd=from=>{ const G=[]; let cur=[],h=0; for(let k=from;k<U.length;k++){ const u=U[k];
+      if(u.fig){ if(cur.length) G.push(cur); G.push([u]); cur=[]; h=0; continue; }          // 圖表自己一個畫面
+      if(cur.length&&h+u.h>avail){ G.push(cur); cur=[]; h=0; } cur.push(u); h+=u.h; } if(cur.length) G.push(cur); return G; };
+  const back=[]; { let cur=[],h=0; for(let k=at-1;k>=0;k--){ const u=U[k];
+      if(u.fig){ if(cur.length) back.unshift(cur); back.unshift([u]); cur=[]; h=0; continue; }
+      if(cur.length&&h+u.h>avail){ back.unshift(cur); cur=[]; h=0; } cur.unshift(u); h+=u.h; } if(cur.length) back.unshift(cur); }
   const G=back.concat(fwd(at)); if(!G.length) G.push([]);
   SUBG=G; SUBN=G.length; SUB=SUB_END?SUBN-1:back.length; SUB_END=false;
   showSub(); }
@@ -1033,7 +1050,7 @@ $('sheet').addEventListener('click',e=>{
   const g=t.closest('[data-mode-go]'); if(g){ MODE=g.dataset.modeGo; LS.set('mode',MODE); return showPage(PG); }
   const tn=t.closest('[data-turn]'); if(tn) return turn(+tn.dataset.turn);
   if(t.closest('[data-aipage]')) return aiPage(PG);
-  if(t.closest('[data-tblmode]')){ LS.set('tblImg',!LS.get('tblImg',false)); return renderPage(); }
+  if(t.closest('[data-tblmode]')){ LS.set('tblText',!LS.get('tblText',false)); return renderPage(); }
   const zm=t.closest('[data-zoom]'); if(zm){ const d=$('dlg'); d.innerHTML=`<img src="${zm.dataset.zoom}" alt="" style="max-width:100%;display:block;margin:0 auto">${zm.alt?`<p class="note" style="text-align:center">${esc(zm.alt)}</p>`:''}<div class="row" style="justify-content:flex-end"><button type="button" onclick="this.closest('dialog').close()">關閉</button></div>`; d.style.width='min(980px,calc(100vw - 32px))'; d.showModal(); d.addEventListener('close',()=>d.style.width='',{once:true}); return; }
   if(t.closest('[data-retr]')){ delete TR_ERR[PG]; ensureZh(PG).catch(()=>{}); return; }
   if(handleCard(e)) return;

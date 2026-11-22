@@ -789,6 +789,7 @@ def parse_job(bid):
                         hasText=sum(len(page_text(pg)) for pg in pages) > 40)
     if b and claude_path() and (read_json(CONFIG, {}) or {}).get('proof', True):
         with LOCK: write_json(os.path.join(d, 'proof.json'), {})       # 重新解析過：整本重新校對
+        update_book(bid, proof={'status': 'queued', 'done': 0, 'total': total})  # 記下來：App 關掉再開也會接著校對
         PROOFQ.put(bid)                                                 # AI 逐頁對照原書校對
     elif b and b.get('scanned'): QQ.put(bid)                            # 沒有 Claude：至少檢查亂碼頁
 

@@ -453,7 +453,7 @@ dialog.setdlg form{display:flex;flex-direction:column;max-height:min(86vh,860px)
 <div class="top">
   <button type="button" class="brand" id="home" title="回到首頁"><span class="dot"></span>Readiverse</button>
   <nav class="nav" id="nav" aria-label="書庫">
-    <button type="button" data-f="home">首頁</button><button type="button" data-f="reading">閱讀中</button><button type="button" data-f="fav">最愛</button><button type="button" data-f="done">讀完</button><button type="button" data-f="all">全部書籍</button>
+    <button type="button" data-f="home">首頁</button><button type="button" data-f="reading">閱讀中</button><button type="button" data-f="fav">最愛</button><button type="button" data-f="done">已完成</button>
   </nav>
   <span class="grow"></span>
   <span id="libTools" class="row" style="gap:10px;flex-wrap:nowrap">
@@ -515,7 +515,7 @@ const api={
     const r=await fetch(u,o); let j=null; try{ j=await r.json(); }catch(e){} if(!r.ok) throw new Error((j&&j.error)||('HTTP '+r.status)); return j; },
   get:u=>api.req('GET',u), put:(u,b,raw)=>api.req('PUT',u,b,raw), post:(u,b,raw)=>api.req('POST',u,b,raw), patch:(u,b)=>api.req('PATCH',u,b), del:u=>api.req('DELETE',u)};
 if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-const STATUS={unread:'未讀',reading:'閱讀中',done:'讀完'};
+const STATUS={unread:'未讀',reading:'閱讀中',done:'已完成'};
 let toastT=null;
 function toast(html,ms){ const t=$('toast'); t.innerHTML=html; t.hidden=false; clearTimeout(toastT); if(ms!==0) toastT=setTimeout(()=>t.hidden=true,ms||2600); }
 
@@ -527,7 +527,7 @@ $('themeBtn').onclick=()=>setTheme(isDark()?'light':'dark');
 /* =====================================================================
    書庫
    ===================================================================== */
-let LIB={books:[],categories:[]}, FILTER=LS.get('filter2','home'), VIEW=LS.get('view2','grid'), SORT=LS.get('sort','opened');
+let LIB={books:[],categories:[]}, FILTER=(f=>f==='all'?'home':f)(LS.get('filter2','home')), VIEW=LS.get('view2','grid'), SORT=LS.get('sort','opened');
 async function loadLib(){ await loadCaps(); LIB=await api.get('/api/library'); renderLib(); }
 const stTag=b=>`<span data-st="${b.id}">${aiTag(b)}</span>`;   // 背景處理的進度：只更新這一小塊，首頁不用整個重畫
 function aiTag(b){ const a=b.ai||{}, r=b.parse||{}, sp='<span class="spin"></span>';
@@ -552,7 +552,7 @@ function prog(b){ return b.pages?Math.min(1,(b.lastPage+1)/b.pages):0; }
 const byOpened=(a,b)=>(b.opened||b.added)-(a.opened||a.added);
 const SORTS={opened:byOpened,added:(a,b)=>b.added-a.added,title:(a,b)=>a.title.localeCompare(b.title,'zh-Hant'),progress:(a,b)=>prog(b)-prog(a)};
 function inFilter(b,f){ return f==='fav'?b.favorite:f==='reading'?b.status==='reading':f==='done'?b.status==='done':f==='none'?!b.category:f.startsWith('c:')?b.category===f.slice(2):true; }
-function filterName(f){ return f==='all'?'全部書籍':f==='fav'?'我的最愛':f==='reading'?'閱讀中':f==='done'?'讀完':f==='none'?'未分類':f.slice(2); }
+function filterName(f){ return f==='all'?'全部書籍':f==='fav'?'我的最愛':f==='reading'?'閱讀中':f==='done'?'已完成':f==='none'?'未分類':f.slice(2); }
 const coverUrl=b=>`/books/${b.id}/cover.jpg?v=${b.coverV||b.added}`;
 const hasCover=b=>b.cover!==false;
 function hueOf(t){ let h=0; for(const c of String(t)) h=(h*31+c.codePointAt(0))>>>0; return h%360; }
@@ -606,7 +606,7 @@ function renderLib(soft){
     let h=heroHtml();
     if(B.length){
       // 書架：分類變成一排標籤，下面只放一排書（不用一直往下捲）
-      const tabs=[...(reading.length?[['reading','閱讀中',reading]]:[]),['all','全部',B],['fav','★ 最愛',B.filter(b=>b.favorite)],['done','讀完',B.filter(b=>b.status==='done')],
+      const tabs=[...(reading.length?[['reading','閱讀中',reading]]:[]),['all','全部',B],['fav','★ 最愛',B.filter(b=>b.favorite)],['done','已完成',B.filter(b=>b.status==='done')],
         ...LIB.categories.map(c=>['c:'+c,c,B.filter(b=>b.category===c)]),['none','未分類',B.filter(b=>!b.category)]];
       let T=LS.get('shelfTab',reading.length?'reading':'all'); if(!tabs.some(x=>x[0]===T)) T=tabs[0][0];
       const cur=tabs.find(x=>x[0]===T)[2].slice().sort(T==='reading'?byOpened:SORTS.added);
@@ -664,7 +664,7 @@ function renderMenu(){
   $('avBtn').textContent=(name||'R').slice(0,1).toUpperCase();
   const read=B.reduce((a,b)=>a+(b.opened||b.lastPage?b.lastPage+1:0),0), notes=B.reduce((a,b)=>a+(b.notes||0),0), marks=B.reduce((a,b)=>a+(b.marks||0),0);
   $('menu').innerHTML=`<div class="who"><span class="avb">${esc((name||'R').slice(0,1).toUpperCase())}</span><div style="min-width:0"><b style="font-family:var(--f-zh)">${name?esc(name):'讀者'}</b><div class="note" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(LIB.libPath||'')}">${sto.kind&&sto.kind!=='local'?'☁ ':''}${esc(sto.label||'這台電腦')}</div></div></div>
-    <div class="stats">${[[B.length,'本書'],[n(b=>b.status==='reading'),'閱讀中'],[n(b=>b.status==='done'),'讀完'],[read,'頁已讀'],[marks,'螢光筆'],[notes,'筆記']].map(([v,l])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('')}</div>
+    <div class="stats">${[[B.length,'本書'],[n(b=>b.status==='reading'),'閱讀中'],[n(b=>b.status==='done'),'已完成'],[read,'頁已讀'],[marks,'螢光筆'],[notes,'筆記']].map(([v,l])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('')}</div>
     <button type="button" class="mi" data-m="set">⚙︎ 設定（名字、外觀、分類、雲端）</button>`; }
 $('avBtn').onclick=e=>{ e.stopPropagation(); const m=$('menu'); m.hidden=!m.hidden; $('avBtn').setAttribute('aria-expanded',String(!m.hidden)); };
 $('menu').onclick=e=>{ if(e.target.closest('[data-m="set"]')){ $('menu').hidden=true; openSettings(); } };

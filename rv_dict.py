@@ -444,7 +444,7 @@ def ielts_import():
             t = (p.get('text') or '').strip()
             if not t or t.lower() in seen: continue
             seen.add(t.lower()); np_ += 1
-            q = {k: p[k] for k in ('id', 'text', 'ctx', 'title', 't', 'status', 'error', 'key', 'task', 'zh', 'pattern', 'note', 'examples', 'more', 'noMark') if k in p}
+            q = {k: p[k] for k in ('id', 'text', 'ctx', 'title', 't', 'status', 'error', 'key', 'task', 'zh', 'pattern', 'note', 'examples', 'more') if k in p}
             q['src'] = 'ielts'; q['book'] = ''
             if q.get('status') in ('pending', 'running'): q['status'] = 'error'; q['error'] = '匯入時還沒分析完，可以按重新分析'
             P.append(q)

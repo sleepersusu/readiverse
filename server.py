@@ -718,7 +718,6 @@ class H(BaseHTTPRequestHandler):
                 except ValueError as e: return self.err(400, str(e))
             if act == 'del': rv_dict.phrase_del(j.get('id')); return self.send(200, {'ok': True})
             if act == 'retry': rv_dict.phrase_retry(j.get('id')); return self.send(200, {'ok': True})
-            if act == 'mark': rv_dict._phr_update(j.get('id'), noMark=bool(j.get('noMark'))); return self.send(200, {'ok': True})
         if p == ['ielts-import'] and m == 'GET':
             return self.send(200, rv_dict.ielts_info())
         if p == ['ielts-import'] and m == 'POST':

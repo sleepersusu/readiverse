@@ -1083,7 +1083,7 @@ async function loadMarks(){
   VOCM=VLIST.filter(v=>/^[a-z][a-z'’-]{2,}$/i.test(v.w)&&!/\s/.test(v.w));
   const e2=x=>x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), ws=[...new Set(VOCM.map(v=>v.k))].sort((a,b)=>b.length-a.length);
   VOCRE=ws.length?new RegExp("(?<![A-Za-z-])(?<![A-Za-z]['’])("+ws.map(e2).join('|')+")(?:s|es|d|ed|ing|ly)?(?![A-Za-z-])(?!['’][A-Za-z])",'gi'):null;
-  PHRM=PLIST.filter(x=>x.status==='done'&&!x.noMark).map(x=>({x,re:phrRegex(x.key)||(String(x.text||'').split(/\s+/).length<=6?phrRegex(x.text):null)})).filter(o=>o.re);
+  PHRM=PLIST.filter(x=>x.status==='done').map(x=>({x,re:phrRegex(x.key)||(String(x.text||'').split(/\s+/).length<=6?phrRegex(x.text):null)})).filter(o=>o.re);
   colCounts();
   if(BOOK&&MODE==='text'&&!$('vRead').hidden) renderPage();
 }
@@ -1156,10 +1156,9 @@ function phCard(x,rc){ hideCard(); const d=document.createElement('div'); d.clas
     ${x.text&&x.text!==x.key?`<div><div class="lab">收藏的原句</div><div class="ctx">${esc(x.text)}</div></div>`:''}
     <div class="note">${x.title?`收藏自〈${esc(x.title)}〉`:''}${(x.more||[]).length?`・另外在 ${x.more.length} 個地方也收藏過`:''}</div>
     <div class="acts">${conf?`<span class="note">確定移除這個句型？</span><button type="button" class="small" data-no>取消</button><button type="button" class="small danger" data-yes>移除</button>`:
-      `<button type="button" class="small" data-say>${ICSAY.replace('class="i"','class="i" style="display:inline-block;vertical-align:-3px;width:14px;height:14px"')} 唸一次</button><button type="button" class="small" data-nomark title="這個句型不要在文章裡畫底線（收藏還在）">不要畫底線</button><span class="grow"></span><button type="button" class="ib ghost" data-del title="移除收藏" aria-label="移除收藏">${ICTRASH}</button>`}</div>`;
+      `<button type="button" class="small" data-say>${ICSAY.replace('class="i"','class="i" style="display:inline-block;vertical-align:-3px;width:14px;height:14px"')} 唸一次</button><span class="grow"></span><button type="button" class="ib ghost" data-del title="移除收藏" aria-label="移除收藏">${ICTRASH}</button>`}</div>`;
     const q=s=>d.querySelector(s);
     if(q('[data-say]')) q('[data-say]').onclick=()=>sayTTS(x.key||x.text);
-    if(q('[data-nomark]')) q('[data-nomark]').onclick=async()=>{ await api.post('/api/phrase/mark',{id:x.id,noMark:true}); hideCard(); await loadMarks(); toast('這個句型不再畫底線'); };
     if(q('[data-del]')) q('[data-del]').onclick=()=>{ conf=true; draw(); };
     if(q('[data-no]')) q('[data-no]').onclick=()=>{ conf=false; draw(); };
     if(q('[data-yes]')) q('[data-yes]').onclick=async()=>{ await api.post('/api/phrase/del',{id:x.id}); hideCard(); toast('已移除'); await loadMarks(); if(!$('vLib').hidden) renderLib(true); }; };
@@ -1190,8 +1189,8 @@ function phrasePage(q){
       ${st==='done'?`${x.zh?`<div class="pzh">${esc(x.zh)}</div>`:''}${x.pattern&&x.pattern!==x.key?`<div class="pat">${esc(x.pattern)}</div>`:''}${x.note?`<div class="note">${esc(x.note)}</div>`:''}${ex?`<div class="ex">${bold2(ex.en||'')}<small>${bold2(ex.zh||'')}</small></div>`:''}`
         :st==='error'?`<div class="err">${esc(x.error||'AI 分析失敗')}</div>`:'<div class="note"><span class="spin"></span>AI 分析中…</div>'}
       ${x.text&&x.text!==x.key?`<div class="orig">${esc(x.text)}</div>`:''}
-      <div class="from">${x.title?`〈${esc(x.title)}〉`:''}${x.noMark?'・不畫底線':''}</div>
-      <div class="acts">${st==='error'?`<button type="button" class="small" data-pretry>重新分析</button>`:''}${x.noMark?`<button type="button" class="small" data-pmark title="在文章裡畫底線">恢復底線</button>`:''}<button type="button" class="ib ghost" data-psay title="唸一次" aria-label="唸一次">${ICSAY}</button><button type="button" class="ib ghost" data-pdel title="移除" aria-label="移除">${ICTRASH}</button></div></div>`; };
+      <div class="from">${x.title?`〈${esc(x.title)}〉`:''}</div>
+      <div class="acts">${st==='error'?`<button type="button" class="small" data-pretry>重新分析</button>`:''}<button type="button" class="ib ghost" data-psay title="唸一次" aria-label="唸一次">${ICSAY}</button><button type="button" class="ib ghost" data-pdel title="移除" aria-label="移除">${ICTRASH}</button></div></div>`; };
   return `<div class="page"><div class="hd"><button type="button" class="ib" data-f="home" title="回首頁" aria-label="回首頁">${IC.l}</button><span style="color:var(--ph);display:flex">${ICP}</span><h1>句子收藏</h1><span class="cnt note">${(PLIST||[]).length} 句</span><span class="grow"></span>${ieltsBtn()}</div>
     <p class="note" style="margin:-8px 0 18px">讀書時選一段句子按 ✦ 收藏，AI 會抽出值得學的片語、句型，附上中文和例句；之後所有書裡出現同樣的句型都會畫紫色底線。用上方搜尋框可以篩選。</p>
     ${q?`<div class="note" style="margin-bottom:8px">篩選「${esc(q)}」：${L.length} 句</div>`:''}
@@ -1215,7 +1214,6 @@ $('vLib').addEventListener('click',async e=>{ const t=e.target;
   if(pc){ const x=(PLIST||[]).find(y=>y.id===pc.dataset.pid); if(!x) return;
     if(t.closest('[data-psay]')) return sayTTS(x.key||x.text);
     if(t.closest('[data-pretry]')){ await api.post('/api/phrase/retry',{id:x.id}); x.status='pending'; renderLib(true); return phrWatch(x.id); }
-    if(t.closest('[data-pmark]')){ await api.post('/api/phrase/mark',{id:x.id,noMark:false}); await loadMarks(); return renderLib(true); }
     if(t.closest('[data-pdel]')){ if(!confirm('移除這個句子收藏？')) return; await api.post('/api/phrase/del',{id:x.id}); await loadMarks(); return renderLib(true); } }
 });
 $('vLib').addEventListener('change',e=>{ if(e.target.id==='vsort'){ VSORT=e.target.value; LS.set('vsort',VSORT); renderLib(true); } });

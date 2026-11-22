@@ -748,13 +748,16 @@ def parse_job(bid):
     update_book(bid, parse={'status': 'running', 'next': start - 1, 'total': b.get('pages') or 0})
     p = subprocess.Popen([VPY, os.path.join(ROOT, 'docling_worker.py'), pdf, figdir, '20', str(start)],
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8')
-    PARSE_PROC[bid] = p; total = b.get('pages') or 0; got = False
+    PARSE_PROC[bid] = p; total = b.get('pages') or 0; got = False; lost = {}
     try:
         for line in p.stdout:
             try: j = json.loads(line)
             except ValueError: continue
             if 'total' in j:
                 total = j['total']; update_book(bid, scanned=bool(j.get('scanned')), ocr=j.get('ocr') or ''); continue
+            if 'lost' in j:                                   # 漏字檢查：記下來（AI 校對會特別注意）
+                lost[str(j['lost'])] = j.get('words') or []; continue
+            if 'to' not in j: continue                        # 其他訊息（警告）
             with LOCK:
                 if not find_book(load_index(), bid): p.kill(); return      # 書被刪掉了
                 if 'pages' in j:
@@ -781,6 +784,7 @@ def parse_job(bid):
         update_book(bid, parse={'status': 'error', 'error': 'Docling 解析失敗（代碼 %s）' % p.returncode}); return
     with LOCK:
         pages = read_json(os.path.join(d, 'pages.json')) or []
+        write_json(os.path.join(d, 'lost.json'), lost)
         b = update_book(bid, parse={'status': 'done', 'next': total, 'total': total, 'rev': int(time.time() * 1000)},
                         hasText=sum(len(page_text(pg)) for pg in pages) > 40)
     if b and claude_path() and (read_json(CONFIG, {}) or {}).get('proof', True):

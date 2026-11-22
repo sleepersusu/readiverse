@@ -270,6 +270,7 @@ def clean_pages(pages, frozen=()):
                 x = re.sub(r'^(?:[-–]|[a-z])\s+(?=[A-Z"“‘])', '', x)         # 章節開頭的裝飾字被辨識成「-」或一個小寫字母
                 x = re.sub(r'^[-–]\s+(?=[a-z])', '', x)                       # 「- twins, and they…」：換行的連字號跑到段落開頭
                 x = re.sub(r'(\d)- (?=[A-Z])', r'\1. ', x)                       # 「summer of 1994- Looking」：句號被認成「-」
+                x = re.sub(r'(?<=[.!?"”’)])\s?\d{1,3}(?:,\s?\d{1,3})*(?=\s+[A-Z"“‘]|\s*$)', '', x).strip()   # 註腳編號（上標的 ¹⁹ 變成一般數字）：「baseline. 19」「free. 8,9 This」
                 if not x or re.fullmatch(r'(page\s*)?[\divxlc]{1,5}', x, re.I): continue      # 只有頁碼
                 if re.fullmatch(r'[A-HJ-Za-z]{1,2}|[^\w\s]{1,3}', x): continue           # 裝飾字、單獨一兩個字母（「N」）
             out.append(x)

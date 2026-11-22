@@ -40,6 +40,9 @@ def check(pages, first):
         for x in T:
             if (re.match(r'^[a-z]{1,4}\s+[A-Z]', x) or re.match(r'^[^\w"“‘(\'\[—–]', x)) and not re.fullmatch(r'[\d\s-]+', x) and not re.match(r'^[-–—]\s*[A-Z]', x): probs.append((no, '段落開頭有雜訊', x[:60]))
             if len(x) > 3000: probs.append((no, '超長段落（可能接錯）', x[:60] + '…'))
+            m = re.search(r'[.!?"”’)]\s?\d{1,3}(?:,\s?\d{1,3})*(?=\s+[A-Z"“‘]|\s*$)', x)
+            if m: probs.append((no, '註腳編號沒拿掉', x[max(0, m.start() - 25):m.end() + 10]))
+            if re.search(r'[a-z]{3,}-(?:and|but|or|one|the|a|which|that|who|not|even|if)\s', x): probs.append((no, '破折號變成連字號', re.search(r'\S+-(?:and|but|or|one|the|a|which|that|who|not|even|if)\s', x).group(0)))
         for k in range(len(T) - 1):
             if re.search(r'[A-Za-z]-$', T[k]) and re.match(r'[a-z]', T[k + 1]): probs.append((no, '斷字沒接上', T[k][-30:] + ' ‖ ' + T[k + 1][:20]))
         for k in range(len(T) - 1):

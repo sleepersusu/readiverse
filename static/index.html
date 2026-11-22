@@ -499,13 +499,11 @@ dialog.setdlg form{display:flex;flex-direction:column;max-height:min(86vh,860px)
 .lbar.big{height:22px;border-width:2.5px;padding:3px;width:100%}
 .lbar.big i{background:repeating-linear-gradient(-55deg,var(--ink) 0 9px,transparent 9px 15px);transition:none}
 .rprog{display:inline-flex;align-items:center;gap:7px;font-size:12px}
-.rprog .tbar{flex:1;display:flex;gap:2px;height:12px;align-items:stretch;min-width:70px;position:relative;margin-top:22px}
-.rprog .tip{position:absolute;bottom:calc(100% + 6px);transform:translateX(-50%);background:var(--ink);color:var(--bg);font-family:var(--f-mono);font-size:10.5px;font-weight:600;line-height:1;padding:3px 6px;border-radius:999px;white-space:nowrap;min-width:0!important;text-align:center!important}
-.rprog .tip::after{content:"";position:absolute;left:50%;top:100%;transform:translateX(-50%);border:4px solid transparent;border-top-color:var(--ink);border-bottom:0}
+.rprog .tbar{flex:1;display:flex;gap:2px;height:12px;align-items:stretch;min-width:70px}
 .rprog .tbar i{flex:1;border-radius:1px;background:color-mix(in srgb,var(--ink) 14%,transparent)}
 .rprog .tbar i.on{background:var(--ink)!important}
 .rprog b{font-family:var(--f-mono);font-size:11.5px;font-weight:600;min-width:3.2em;text-align:right}
-.pc .rprog{display:flex;margin:4px 0 2px}
+.pc .rprog{display:flex;margin:8px 0 2px;height:14px}
 .pc .rprog.none{visibility:hidden}
 .hero .pg .rprog{flex:1;max-width:320px}
 .hero .pg .rprog .tbar{height:16px}
@@ -667,9 +665,7 @@ function prog(b){ return b.pages?Math.min(1,(b.lastPage+1)/b.pages):0; }
 const pct=b=>b.status==='done'?100:Math.round(prog(b)*100);
 // 閱讀進度：斜紋進度條＋百分比（樣式跟開機畫面的 Loading 一樣）
 // 閱讀進度：一排細直條（讀到的變黑）＋百分比
-// 閱讀進度：一排細直條（讀到的變黑），百分比放在讀到的位置上方的小對話框（像「80%」那款）
-const progBar=(b,cls='')=>{ const p=pct(b), on=Math.max(p>0?1:0,Math.round(p/5)), x=Math.min(92,Math.max(8,(on/20)*100-2.5));
-  return `<span class="rprog ${cls}" title="讀到第 ${b.lastPage+1} / ${b.pages} 頁（${p}%）"><span class="tbar" aria-hidden="true">${Array.from({length:20},(_,k)=>`<i${k<on?' class="on"':''}></i>`).join('')}<b class="tip" style="left:${x}%">${p}%</b></span></span>`; };
+const progBar=(b,cls='')=>{ const p=pct(b), on=Math.round(p/5); return `<span class="rprog ${cls}" title="讀到第 ${b.lastPage+1} / ${b.pages} 頁（${p}%）"><span class="tbar" aria-hidden="true">${Array.from({length:20},(_,k)=>`<i${k<on||(k===0&&p>0)?' class="on"':''}></i>`).join('')}</span><b>${p}%</b></span>`; };
 const byOpened=(a,b)=>(b.opened||b.added)-(a.opened||a.added);
 const SORTS={opened:byOpened,added:(a,b)=>b.added-a.added,title:(a,b)=>a.title.localeCompare(b.title,'zh-Hant'),progress:(a,b)=>prog(b)-prog(a)};
 function inFilter(b,f){ return f==='fav'?b.favorite:f==='reading'?b.status==='reading':f==='done'?b.status==='done':f==='none'?!b.category:f.startsWith('c:')?b.category===f.slice(2):true; }

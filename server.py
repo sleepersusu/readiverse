@@ -575,8 +575,12 @@ def apply_proof(pages, pno, j, frozen):
             if rep_ and len(rep_) > 2 and any(rep_ in pages[x[0]][x[1]] for x in spots()): applied.append(dict(f, already=True))   # 已經改好了
             else: failed.append(f)
             continue
-        if not rep_ and len(find.strip()) > 60:                             # 刪一大段：只准刪「隔壁頁也有一模一樣」的重複
-            core = find.strip(); nb = [x for x in spots() if x != t] + [(pno + 1, i) for i, x in enumerate(pages[pno + 1] if pno + 1 < len(pages) else []) if is_text(x)]
+        W = lambda x: set(re.findall(r'[a-z]{2,}', x.lower()))
+        if rep_ and rep_ in find: core = find.replace(rep_, ' ', 1).strip()
+        elif not rep_: core = find.strip()
+        else: core = '' if len(W(find) - W(rep_)) < 4 else find.strip()
+        if len(core) >= 12 and len(W(core)) >= 2:                          # 會拿掉好幾個字：只准刪「別處也有一模一樣」的重複
+            core = ' '.join(core.split()); nb = [x for x in spots() if x != t] + [(pno + 1, i) for i, x in enumerate(pages[pno + 1] if pno + 1 < len(pages) else []) if is_text(x)]
             if not any(core in pages[x[0]][x[1]] for x in nb): failed.append(f); continue
         pages[t[0]][t[1]] = pages[t[0]][t[1]].replace(find, rep_); applied.append(f)
     for f in j.get('inserts') or []:

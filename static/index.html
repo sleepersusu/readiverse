@@ -501,7 +501,8 @@ dialog.setdlg form{display:flex;flex-direction:column;max-height:min(86vh,860px)
 .rprog{display:inline-flex;align-items:center;gap:7px;font-size:12px}
 .rprog .lbar{flex:1}
 .rprog b{font-family:var(--f-mono);font-size:11.5px;font-weight:600;min-width:3.2em;text-align:right}
-.pc .rprog{display:flex;margin-top:5px}
+.pc .rprog{display:flex;margin:8px 0 2px;height:14px}
+.pc .rprog.none{visibility:hidden}
 .hero .pg .rprog{flex:1;max-width:320px}
 .hero .pg .rprog .lbar{height:14px}
 table.list .rprog{width:100%;min-width:110px}
@@ -683,7 +684,7 @@ function posterCard(b){
       <div class="ov"><div class="t">${esc(b.title)}</div><div class="m">${b.pages?`<span>${started?`${b.lastPage+1}/${b.pages} 頁`:`${b.pages} 頁`}</span>`:''}${b.notes?`<span>✎ ${b.notes}</span>`:''}${b.category?`<span>${esc(b.category)}</span>`:''}</div>
         <div class="b"><button type="button" class="go" data-open="${b.id}" title="${started?'繼續閱讀':'開始閱讀'}" aria-label="${started?'繼續閱讀':'開始閱讀'}">${IC.play}</button><button type="button" data-fav="${b.id}" title="${b.favorite?'取消最愛':'加到最愛'}" aria-label="${b.favorite?'取消最愛':'加到最愛'}" style="${b.favorite?'color:#f5b301':''}">${IC.star}</button><button type="button" data-edit="${b.id}" title="詳細資料" aria-label="詳細資料">${IC.more}</button></div></div>
     </div>
-    <div class="nm">${esc(b.title)}</div><div class="sub">${b.author?`<span>${esc(b.author)}</span>`:''}${stTag(b)}</div>${started&&b.pages?progBar(b,'sm'):''}</div>`; }
+    ${started&&b.pages?progBar(b,'sm'):'<span class="rprog sm none"></span>'}<div class="nm">${esc(b.title)}</div><div class="sub">${b.author?`<span>${esc(b.author)}</span>`:''}${stTag(b)}</div></div>`; }
 function shelf(title,f,L,drop){
   if(!L.length&&!drop) return '';
   return `<section class="shelf"${drop?` data-drop="${esc(f)}"`:''}><div class="hd"><h2>${esc(title)}</h2><span class="cnt">${L.length}</span>${L.length?`<button type="button" class="all" data-f="${esc(f)}">查看全部 ›</button>`:''}</div>

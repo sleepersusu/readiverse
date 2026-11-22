@@ -1005,6 +1005,63 @@ def docling_setup(force=False):
         log.close()
 
 
+
+def _wds(t): return re.findall(r"[a-z0-9]+", str(t).lower().replace('’', "'"))
+
+
+def _bigrams(ws): return set(zip(ws, ws[1:]))
+
+
+def raw_repeats(raw_pages):
+    """PDF 文字裡在 3 頁以上重複出現的段落（頁首、版權聲明）：不能拿來補"""
+    from collections import Counter
+    key = lambda t: re.sub(r'[^a-z]', '', str(t).lower())
+    c = Counter(k for pg in raw_pages for k in {key(x) for x in (pg if isinstance(pg, list) else []) if is_text(x)} if k)
+    return {k for k, n in c.items() if n >= 3}
+
+
+def restore_missing(items, raw_paras, near_items, repeats=frozenset()):
+    """數位書：Docling 有時候會整段漏掉（版面模型沒框到）。拿 PDF 本身的文字（匯入時 pdf.js 抽的，順序和內容都完整）對照：
+    這一頁（含前後頁，跨頁接起來的段落）找不到的段落，放回它在原書的位置。回傳 (新的 items, 補回幾段)"""
+    have = set()
+    for x in list(items) + list(near_items):
+        if is_text(x): have |= _bigrams(_wds(x))
+        elif isinstance(x, dict): have |= _bigrams(_wds(' '.join([x.get('cap') or ''] + [' '.join(map(str, r)) for r in (x.get('rows') or [])])))
+    has_fig = any(isinstance(x, dict) for x in items)
+    out = list(items); added = 0
+    def cover(t):
+        bg = _bigrams(_wds(t)); return (len(bg & have) / len(bg)) if bg else 1.0
+    def find_pos(t):                        # 這一段在 Docling 那一頁的哪一個 item 裡（找最像的）
+        bg = _bigrams(_wds(t)); best, bi = 0, -1
+        for k, x in enumerate(out):
+            if is_text(x):
+                o = len(bg & _bigrams(_wds(x)))
+                if o > best: best, bi = o, k
+        return bi if best >= 2 else -1
+    for ri, r in enumerate(raw_paras):
+        if not is_text(r): continue
+        ws = _wds(r)
+        if len(ws) < 8 or sum(c.isalpha() for c in r) < 0.6 * len(r.replace(' ', '')): continue      # 太短、不像句子（頁碼、圖裡的字）
+        if re.sub(r'[^a-z]', '', r.lower()) in repeats: continue                                     # 每頁都有的頁首、版權聲明
+        L = [c for c in r if c.isalpha()]
+        if L and sum(c.isupper() for c in L) > 0.6 * len(L): continue                                 # 全大寫：頁首、章名頁的裝飾字
+        if has_fig and (len(ws) < 15 or not re.search(r'[.!?]["”’)]?$', r.strip())): continue      # 有圖的頁：只補像正文的長段落
+        if cover(r) >= 0.4: continue
+        pos = len(out)                      # 放在：後面第一個 Docling 有的段落前面；找不到就放在前一段後面
+        for r2 in raw_paras[ri + 1:]:
+            if is_text(r2) and cover(r2) >= 0.6:
+                k = find_pos(r2)
+                if k >= 0: pos = k; break
+        else:
+            for r0 in reversed(raw_paras[:ri]):
+                if is_text(r0) and cover(r0) >= 0.6:
+                    k = find_pos(r0)
+                    if k >= 0: pos = k + 1; break
+        t = re.sub(r'\s+', ' ', r).strip()
+        out.insert(pos, t); have |= _bigrams(_wds(t)); added += 1
+    return out, added
+
+
 def fix_dashes(items, raw_text):
     """Docling 會把「—」變成「-」：pdf.js 抽的原始文字裡同一個地方是「—」就換回來"""
     if '—' not in raw_text and '–' not in raw_text: return items
@@ -1043,13 +1100,13 @@ def parse_job(bid):
     update_book(bid, parse={'status': 'running', 'next': start - 1, 'total': b.get('pages') or 0})
     p = subprocess.Popen([VPY, os.path.join(ROOT, 'docling_worker.py'), pdf, figdir, '20', str(start)],
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8')
-    PARSE_PROC[bid] = p; total = b.get('pages') or 0; got = False; lost = {}
+    PARSE_PROC[bid] = p; total = b.get('pages') or 0; got = False; lost = {}; scanned = bool(b.get('scanned')); raw_rep = None
     try:
         for line in p.stdout:
             try: j = json.loads(line)
             except ValueError: continue
             if 'total' in j:
-                total = j['total']; update_book(bid, scanned=bool(j.get('scanned')), ocr=j.get('ocr') or ''); continue
+                total = j['total']; scanned = bool(j.get('scanned')); update_book(bid, scanned=scanned, ocr=j.get('ocr') or ''); continue
             if 'lost' in j:                                   # 漏字檢查：記下來（AI 校對會特別注意）
                 lost[str(j['lost'])] = j.get('words') or []; continue
             if 'to' not in j: continue                        # 其他訊息（警告）
@@ -1066,6 +1123,11 @@ def parse_job(bid):
                         if i in frozen or not (0 <= i < len(pages)): continue
                         new = [re.sub(r'\s+', ' ', x).strip() if is_text(x) else x for x in items]
                         if i < len(raw): new = fix_dashes(new, ' '.join(x for x in raw[i] if is_text(x)))
+                        if i < len(raw) and not scanned:                        # Docling 漏掉的段落：用 PDF 本身的文字補回來
+                            nb = [x for q in (i - 1, i + 1) if 0 <= q < len(pages) for x in (j['pages'].get(str(q + 1)) or pages[q])]
+                            if raw_rep is None: raw_rep = raw_repeats(raw)
+                            new, nadd = restore_missing(new, raw[i], nb, raw_rep)
+                            if nadd: lost[str(i + 1)] = (lost.get(str(i + 1)) or []) + ['（Docling 漏掉 %d 段，已用 PDF 文字補回）' % nadd]
                         if page_text(new).strip() or any(not is_text(x) for x in new) or not page_text(pages[i]).strip():
                             pages[i] = new
                     pages = clean_pages(pages, frozen)

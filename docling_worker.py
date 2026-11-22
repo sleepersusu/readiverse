@@ -7,7 +7,7 @@
 段落是字串；圖片是 {"t":"fig","src":"p12_0.png","cap":"Figure 6.2 …"}；
 表格是 {"t":"table","src":"p90_t0.png","rows":[[格, 格…], …],"cap":"Table 6.1 …"}
 """
-import json, os, sys
+import json, re, os, sys
 
 def is_scanned(pd):
     """抽樣幾頁：整頁幾乎都是一張圖 → 掃描書"""
@@ -183,6 +183,7 @@ def main():
                 t = (it.text or '').strip()
                 if not t or (lab == 'caption' and t in caps): continue   # 圖說已經放進圖片裡了
                 if lab in ('section_header', 'title'): t = t            # 標題照樣當一段（之後也許另外標示）
+                if lab == 'list_item' and not re.match(r'^([•●▪◦\-–—*]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s', t): t = '• ' + t   # 條列：原書的「•」是畫上去的，補回來
                 pages.setdefault(pg, []).append(t)
         print(json.dumps({'from': a, 'to': b, 'pages': pages}, ensure_ascii=False), flush=True)
 

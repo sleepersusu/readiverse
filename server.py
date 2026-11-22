@@ -1029,12 +1029,12 @@ def _wds(t): return re.findall(r"[a-z0-9]+", str(t).lower().replace('’', "'"))
 def _bigrams(ws): return set(zip(ws, ws[1:]))
 
 
-def raw_repeats(raw_pages):
+def raw_repeats(raw_pages, n=3):
     """PDF 文字裡在 3 頁以上重複出現的段落（頁首、版權聲明）：不能拿來補"""
     from collections import Counter
     key = lambda t: re.sub(r'[^a-z]', '', str(t).lower())
     c = Counter(k for pg in raw_pages for k in {key(x) for x in (pg if isinstance(pg, list) else []) if is_text(x)} if k)
-    return {k for k, n in c.items() if n >= 3}
+    return {k for k, v in c.items() if v >= n}
 
 
 def restore_missing(items, raw_paras, near_items, repeats=frozenset()):
@@ -1079,6 +1079,79 @@ def restore_missing(items, raw_paras, near_items, repeats=frozenset()):
     return out, added
 
 
+
+def _sq(t): return re.sub(r'\s+', ' ', str(t)).strip()
+
+
+def split_by_raw(pages, raw, i, frozen=()):
+    """數位書：Docling 常把「首行縮排、中間沒空行」的好幾段黏成一段。用 PDF 本身的分段（pdf.js）在原書分段的地方切開；
+    切出來的段落如果原本在下一頁（跨頁接過來的），搬回下一頁開頭。回傳切了幾刀"""
+    if i in frozen or i >= len(pages) or i >= len(raw): return 0
+    starts = []                                         # (開頭的字, 原本在第幾頁)
+    for q in (i, i + 1):
+        if q < len(raw) and q not in frozen:
+            for r in raw[q] or []:
+                if is_text(r) and len(_wds(r)) >= 4: starts.append((_sq(r)[:32], q))
+    if not starts: return 0
+    cuts = 0; out = []
+    for x in pages[i]:
+        if not is_text(x): out.append((x, i)); continue
+        t = _sq(x); pos = []
+        for key, q in starts:
+            k = t.find(key, 1)
+            while k > 0:
+                if re.search(r'[.!?:;"”’)\]]\s$', t[max(0, k - 3):k]) or t[k - 1:k] == ' ' and re.search(r'[.!?"”’)]$', t[:k].rstrip()):
+                    pos.append((k, q)); break
+                k = t.find(key, k + 1)
+        if not pos: out.append((x, i)); continue
+        pos = sorted(set(pos)); prev = 0; src = i
+        for k, q in pos:
+            out.append((t[prev:k].strip(), src)); prev, src = k, q; cuts += 1
+        out.append((t[prev:].strip(), src))
+    stay = [x for x, q in out if q == i and (not is_text(x) or x)]
+    move = [x for x, q in out if q == i + 1 and x]
+    if i + 1 < len(pages):                              # 下一頁本來就有的（重複了）：不搬，直接拿掉
+        nxt = {_sq(y)[:40] for y in pages[i + 1] if is_text(y)}
+        move = [x for x in move if not (is_text(x) and _sq(x)[:40] in nxt)]
+    if move and i + 1 < len(pages) and (i + 1) not in frozen and all(is_text(m) for m in move):
+        pages[i + 1] = move + pages[i + 1]
+    else: stay += move
+    pages[i] = stay
+    return cuts
+
+
+
+def dedupe_page(items):
+    """同一頁裡一模一樣的段落只留第一個（分段、跨頁搬動之後可能出現兩份）"""
+    seen, out = set(), []
+    for x in items:
+        if is_text(x):
+            k = _sq(x)
+            if len(k) > 30 and k in seen: continue
+            seen.add(k)
+        out.append(x)
+    return out
+
+
+def restore_headings(items, raw_paras, near_items, repeats=frozenset()):
+    """原書有、Docling 漏掉的小標題（很短、不是句子）：放回它前後段落中間"""
+    repeats_h = repeats                                  # 呼叫的人給「出現 6 頁以上」的頁首（標題本身會在目錄、章節頁重複幾次）
+    qn = lambda t: re.sub(r'[^a-z0-9]', '', str(t).lower())
+    have = {qn(x) for x in list(items) + list(near_items) if is_text(x)}
+    out = list(items); n = 0
+    for ri, r in enumerate(raw_paras or []):
+        if not is_text(r): continue
+        t = _sq(r); ws = _wds(t)
+        if not (1 <= len(ws) <= 10) or len(t) > 70 or re.search(r'[.!?,;:]["”’)]?$', t) or not re.match(r'[A-Z0-9"“‘]', t): continue
+        if sum(c.isalpha() for c in t) < 0.6 * len(t.replace(' ', '')): continue
+        if re.sub(r'[^a-z]', '', t.lower()) in repeats_h or qn(t) in have or re.fullmatch(r'[\d\s.]+', t): continue
+        nxt = next((_sq(r2)[:32] for r2 in raw_paras[ri + 1:] if is_text(r2) and len(_wds(r2)) >= 6), '')
+        k = next((j for j, x in enumerate(out) if is_text(x) and nxt and _sq(x).startswith(nxt)), -1)
+        if k < 0: continue                              # 找不到它後面那一段：不確定放哪，不補
+        out.insert(k, t); have.add(qn(t)); n += 1
+    return out, n
+
+
 def fix_dashes(items, raw_text):
     """Docling 會把「—」變成「-」：pdf.js 抽的原始文字裡同一個地方是「—」就換回來"""
     if '—' not in raw_text and '–' not in raw_text: return items
@@ -1117,7 +1190,7 @@ def parse_job(bid):
     update_book(bid, parse={'status': 'running', 'next': start - 1, 'total': b.get('pages') or 0})
     p = subprocess.Popen([VPY, os.path.join(ROOT, 'docling_worker.py'), pdf, figdir, '20', str(start)],
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8')
-    PARSE_PROC[bid] = p; total = b.get('pages') or 0; got = False; lost = {}; scanned = bool(b.get('scanned')); raw_rep = None
+    PARSE_PROC[bid] = p; total = b.get('pages') or 0; got = False; lost = {}; scanned = bool(b.get('scanned')); raw_rep = None; raw_rep6 = None
     try:
         for line in p.stdout:
             try: j = json.loads(line)
@@ -1148,6 +1221,14 @@ def parse_job(bid):
                         if page_text(new).strip() or any(not is_text(x) for x in new) or not page_text(pages[i]).strip():
                             pages[i] = new
                     pages = clean_pages(pages, frozen)
+                    if not scanned and raw:                         # 數位書：照原書的分段切開黏在一起的段落、補回漏掉的小標題
+                        if raw_rep6 is None: raw_rep6 = raw_repeats(raw, 6)
+                        for k in sorted(int(x) - 1 for x in j['pages']):
+                            if k in frozen or not (0 <= k < len(pages)): continue
+                            split_by_raw(pages, raw, k, frozen)
+                            nb = [x for q in (k - 1, k + 1) if 0 <= q < len(pages) for x in pages[q]]
+                            if k < len(raw): pages[k], _ = restore_headings(pages[k], raw[k], nb, raw_rep6)
+                            pages[k] = dedupe_page(pages[k])
                     write_json(pf, pages)
                 update_book(bid, parse={'status': 'running', 'next': j['to'], 'total': total, 'rev': int(time.time() * 1000)},
                             hasText=True if got else b.get('hasText'))

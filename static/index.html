@@ -533,6 +533,8 @@ table.list .rprog{width:100%;min-width:110px}
 .blockcard{max-width:520px;width:100%;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:26px;display:grid;gap:12px;box-shadow:0 20px 60px rgba(0,0,0,.15)}
 .blockcard h2{margin:0;font-size:20px}.blockcard p{margin:0;line-height:1.7}
 @media (prefers-reduced-motion:reduce){.bootload .dots::after{animation:none;content:"..."}}
+.para.li .ptx{text-indent:-1.1em!important;padding-left:2.4em;margin:.15em 0}
+.para.li+.para:not(.li){margin-top:.5em}
 </style></head>
 <body>
 <div id="boot" class="boot" role="status" aria-live="polite"><div class="bootin"><div class="bootlogo"><span class="d"></span>Readiverse</div>
@@ -1152,7 +1154,7 @@ function renderPage(){
   let h=`<div class="gut" role="separator" aria-orientation="vertical" aria-label="拖曳調整左右寬度" tabindex="0"></div>
     <div class="r2 rhead"><div class="L"><div class="ptop"><span class="runhead" title="${esc(BOOK.meta.title)}">${esc(String(BOOK.meta.title).split(/[:：]/)[0])}</span>${AIPG_ERR[PG]?`<span class="err" style="margin-left:8px">${esc(AIPG_ERR[PG])}</span>`:''}<span class="grow"></span>${pgNav(n,1)}</div></div><div class="R"><textarea id="pgNote" rows="1" placeholder="這一頁的筆記…" aria-label="這一頁的筆記">${esc(pn||'')}</textarea></div></div>`;
   if(!P.length) h+=`<div class="r2"><div class="L"><div class="notext">${BOOK.meta.hasText?'這一頁沒有文字（可能是圖片或空白頁）。':'這本 PDF 是掃描圖片，抽不出文字。'}<br><button type="button" class="small" style="margin-top:10px" data-mode-go="pdf">看原始頁面</button></div></div><div class="R"></div></div>`;
-  else h+=P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div><div class="R"></div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${DIV?(isLabel(t)?' dvl':' dvt'):''}${DIV&&i===0?' dv1':''}${!DIV&&isLabel(t)?' lbl':''}${kind[i].includes('hd')?' hd':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div>
+  else h+=P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div><div class="R"></div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${isTxt(t)&&/^• /.test(t)?' li':''}${DIV?(isLabel(t)?' dvl':' dvt'):''}${DIV&&i===0?' dv1':''}${!DIV&&isLabel(t)?' lbl':''}${kind[i].includes('hd')?' hd':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div>
     <div class="R">${(byPara[i]||[]).map(o=>cardHtml(o)).join('')}${paraNoteHtml(PG,i)}</div></div>`).join('');
   h+=`<div class="r2 rf"><div class="L"><div class="rfoot">${pgNav(n)}</div></div><div class="R"></div></div>`;
   sh.innerHTML=h; sh.querySelectorAll('textarea').forEach(autoGrow); paginate();

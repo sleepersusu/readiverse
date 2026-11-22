@@ -1100,7 +1100,7 @@ function phCard(x,rc){ hideCard(); const d=document.createElement('div'); d.clas
 
 /* ---------- 字典頁、句子收藏頁 ---------- */
 let VSORT=LS.get('vsort','forgot'), VSHOW=150, PSHOW=60;
-function ieltsBtn(){ return `<button type="button" class="small" data-ielts title="把雅思練習室的單字和句子收藏匯進來（重複的不會再加）">從雅思練習室匯入</button>`; }
+function ieltsBtn(){ return `<button type="button" class="ib" data-ielts title="匯入收藏（重複的不會再加）" aria-label="匯入收藏"><svg class="i" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>`; }
 function vocabPage(q){
   const L=(VLIST||[]).filter(v=>!q||[v.w,v.m,v.ctx,v.title].join(' ').toLowerCase().includes(q));
   const S={forgot:(a,b)=>(b.forgot||0)-(a.forgot||0)||(b.forgotT||0)-(a.forgotT||0)||(b.t||0)-(a.t||0), t:(a,b)=>(b.t||0)-(a.t||0), az:(a,b)=>a.k.localeCompare(b.k)}[VSORT];
@@ -1132,9 +1132,9 @@ function phrasePage(q){
       :`<div class="empty"><b>${q?'沒有符合的句子':'還沒有收藏句子'}</b>${q?'':ieltsBtn()}</div>`}</div>`; }
 async function ieltsImport(){
   let info; try{ info=await api.get('/api/ielts-import'); }catch(e){ return toast(esc(e.message)); }
-  if(!info.found) return toast('這台電腦找不到雅思練習室的資料',4000);
-  if(!confirm(`從雅思練習室匯入？\n${info.path}\n單字 ${info.vocab} 個、句子 ${info.phrases} 句（已經有的不會重複加）\n\n匯入後兩邊還是各自分開。`)) return;
-  try{ toast('<span class="spin"></span>匯入中…',0); const j=await api.post('/api/ielts-import',{}); await loadMarks(); renderLib(true); toast(`匯入完成：新增單字 ${j.vocab} 個、句子 ${j.phrases} 句`,4000); }catch(e){ toast('匯入失敗：'+esc(e.message),5000); } }
+  if(!info.found) return toast('找不到可以匯入的收藏',4000);
+  if(!confirm(`匯入收藏？\n單字 ${info.vocab} 個、句子 ${info.phrases} 句（已經有的不會重複加）`)) return;
+  try{ toast('<span class="spin"></span>匯入中…',0); const j=await api.post('/api/ielts-import',{}); await loadMarks(); renderLib(true); toast(j.vocab||j.phrases?`匯入完成：新增單字 ${j.vocab} 個、句子 ${j.phrases} 句`:'都已經匯入過了，沒有新的',4000); }catch(e){ toast('匯入失敗：'+esc(e.message),5000); } }
 $('vLib').addEventListener('click',async e=>{ const t=e.target;
   if(t.closest('[data-ielts]')) return ieltsImport();
   if(t.closest('[data-vmore]')){ VSHOW+=150; return renderLib(true); }

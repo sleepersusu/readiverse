@@ -425,7 +425,7 @@ def ielts_info():
 
 def ielts_import():
     L = ielts_lib()
-    if not L: raise ValueError('找不到雅思練習室的資料')
+    if not L: raise ValueError('找不到可以匯入的收藏')
     src_v = (_read(os.path.join(L, '_練習紀錄.json'), {}) or {}).get('vocab') or []
     src_p = _read(os.path.join(L, '_句子收藏.json'), []) or []
     src_c = _read(os.path.join(L, '_字典快取.json'), {}) or {}

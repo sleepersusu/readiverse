@@ -21,7 +21,7 @@ iconutil -c icns "$ICONSET" -o "$TMP/icon.icns"
 # ---------- 要放進 App 的程式 ----------
 STAGE="$TMP/stage"; mkdir -p "$STAGE/static" "$STAGE/assets"
 cp "$SRC"/server.py "$SRC"/rv_dict.py "$SRC"/docling_worker.py "$SRC"/app.py "$STAGE/"
-cp "$SRC"/static/index.html "$STAGE/static/"; cp "$SRC"/assets/icon.png "$STAGE/assets/"
+cp "$SRC"/static/index.html "$STAGE/static/"; cp "$SRC"/assets/icon.png "$SRC"/assets/dict.json.gz "$STAGE/assets/"
 V="$(git -C "$SRC" describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)"; printf '%s-dev' "$V" > "$STAGE/VERSION"   # 自己打包的是開發版：顯示版號，但不自動更新
 
 # ---------- 方法一：PyInstaller 打包成真正的 App（需要 uv）----------

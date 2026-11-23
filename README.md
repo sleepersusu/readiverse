@@ -93,3 +93,7 @@ git tag v0.1.0 && git push origin v0.1.0
 ## AI 校對（抽樣）
 
 每 5 頁抽 1 頁給 Claude 對照原書校對，加上程式覺得可疑的頁（漏字、亂碼）；抽到的頁有修正，就把前後各 2 頁也校對。
+
+## 字典
+
+App 裡附了一份英漢字典 `assets/dict.json.gz`（[ECDICT](https://github.com/skywind3000/ECDICT)，MIT 授權，約 40 萬字），Windows、新電腦裝好就能離線查單字。電腦上如果有 `~/.readiverse/字典.json` 會優先用那份。

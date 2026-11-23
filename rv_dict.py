@@ -50,11 +50,20 @@ DICT_CANDS = [os.path.join(HERE, '字典.json'), os.path.expanduser('~/.readiver
 _dict = None
 
 
+BUNDLED_DICT = os.path.join(HERE, 'assets', 'dict.json.gz')     # App 裡附的字典（ECDICT，MIT 授權）：Windows、新電腦裝好就能查
+
+
 def local_dict():
     global _dict
     if _dict is None:
         p = next((c for c in DICT_CANDS if os.path.exists(c)), None)
-        _dict = _read(p, {'d': {}, 'inf': {}}) if p else {'d': {}, 'inf': {}}
+        if p: _dict = _read(p, None)
+        if not _dict and os.path.exists(BUNDLED_DICT):
+            try:
+                import gzip
+                with gzip.open(BUNDLED_DICT, 'rt', encoding='utf-8') as f: _dict = json.load(f)
+            except Exception: _dict = None
+        if not _dict: _dict = {'d': {}, 'inf': {}}
     return _dict
 
 

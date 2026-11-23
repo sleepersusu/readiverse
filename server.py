@@ -490,6 +490,32 @@ def fix_spaced_caps(x):
     return ' '.join(toks)
 
 
+FUNC_END = re.compile(r'\b(the|of|and|a|an|to|in|on|for|with|about|at|by|from|or)$', re.I)
+
+
+def tidy_page(pg):
+    """一頁裡的小問題：
+    - 電子書的導覽文字（Contents - Prev / Next）拿掉
+    - 「PART」「One」拆成兩行 → 「PART One」
+    - 注釋的編號「1.」和內容分開 → 「1. 內容」
+    - 章名斷在「…About the」「Day」 → 接回一行"""
+    out = []
+    for x in pg:
+        if is_text(x) and re.fullmatch(r'\s*(Contents|Table of Contents)?\s*[-–|]?\s*Prev(ious)?\s*[/|]\s*Next\s*', x, re.I): continue
+        if out and is_text(x) and is_text(out[-1]):
+            a, b = out[-1].strip(), x.strip()
+            if re.fullmatch(r'(PART|Part|BOOK|Book|CHAPTER|Chapter|VOLUME|Volume)', a) and re.fullmatch(r'([IVXLC]+|\d{1,3}|[A-Z][a-z]{2,8}|[A-Z]{3,9})\.?', b):
+                out[-1] = a + ' ' + b; continue
+            if re.fullmatch(r'\d{1,3}\.', a) and len(b) > 3:
+                out[-1] = a + ' ' + b; continue
+            ws = a.split(); caps = sum(1 for w in ws if w[:1].isupper())
+            if (len([y for y in out if is_text(y)]) <= 2 and len(ws) <= 9 and caps >= 0.6 * len(ws) and not re.search(r'[.!?:;,"”’)]$', a)
+                    and FUNC_END.search(a) and len(b.split()) <= 3 and re.match(r'[A-Z]', b) and not re.search(r'[.!?,;]$', b)):     # 只用在頁面開頭的章名（索引頁不要）
+                out[-1] = a + ' ' + b; continue
+        out.append(x)
+    return out
+
+
 def clean_pages(pages, frozen=()):
     """回傳清理過的 pages；frozen 裡的頁不動"""
     pages = [list(pg) for pg in pages]; n = len(pages); frozen = set(frozen)
@@ -516,6 +542,8 @@ def clean_pages(pages, frozen=()):
                 if re.fullmatch(r'[A-HJ-Za-z]{1,2}|[^\w\s]{1,3}', x): continue           # 裝飾字、單獨一兩個字母（「N」）
             out.append(x)
         pages[p] = out
+    for p, pg in enumerate(pages):
+        if p not in frozen: pages[p] = tidy_page(pg)
     # 2) 頁首頁尾：很多頁的開頭／結尾都出現的短句（書名、章名、「78 EMOTIONALLY CHARGED」）
     cnt = {}
     for p, pg in enumerate(pages):

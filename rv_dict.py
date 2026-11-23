@@ -224,7 +224,7 @@ def lookup(w):
         if en is not None:
             with LOCK:
                 cache = _read(CACHEF(), {}); c = cache.get(k) or c; c['en'] = en; cache[k] = c; _write(CACHEF(), cache)
-    if c and (c.get('src') in ('cambridge', 'ai') or time.time() - c.get('tried', 0) < 7 * 86400): return c
+    if c and (c.get('src') in ('cambridge', 'ai') or (c.get('t') and time.time() - c.get('tried', 0) < 7 * 86400)): return c   # 沒查到的不記：下次再查
     res, offline = None, False
     for cand in candidates(k)[:3]:
         r = cambridge(cand)
@@ -297,6 +297,149 @@ def vocab_marks():
     return [dict(v, m=(cache.get(v['k']) or {}).get('t', '')) for v in vocab()]
 
 
+
+# ---------- 搭配詞（跟雅思練習室一樣）：先查真實語料（Google Books Ngram、Datamuse），再請 AI 整理 ----------
+# AI 只能從語料裡查到的候選挑選、分組、翻中文、造例句；語料裡沒有的搭配不會出現
+def COLF(): return os.path.join(_get_lib(), '_搭配詞.json')
+COL_BUSY = set()
+COL_STOP = set(('the a an and or but of to in on at for with by from as is was are were be been being it its this that these those his her their our my your '
+                'he she they we you i me him them us which who whom whose what when where why how not no so if than then there here also very more most '
+                'such some any all each other into about over after before between through during s t , . ; : " \' ( ) - -- ! ?').split())
+
+
+def _getj(url, t=12):
+    import urllib.request
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': UA, 'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=t) as r: return json.loads(r.read().decode('utf-8', 'ignore'))
+    except Exception:
+        try:
+            out = subprocess.run(['curl', '-sL', '--max-time', str(t), '-A', UA, url], capture_output=True, timeout=t + 4).stdout
+            return json.loads(out.decode('utf-8', 'ignore')) if out.strip() else None
+        except Exception: return None
+
+
+def _ng_query(content):
+    """Google Books Ngram：[(片語, 每十億字出現幾次)]；連不上回 None"""
+    for corp in ('en', 'en-2019'):
+        d = _getj('https://books.google.com/ngrams/json?content=' + urllib.parse.quote(content, safe='*,') + '&year_start=2000&year_end=2019&corpus=' + corp + '&smoothing=0')
+        if isinstance(d, list):
+            out = []
+            for e in d:
+                if not isinstance(e, dict) or not e.get('ngram') or '(All)' in e['ngram'] or '*' in e['ngram']: continue
+                ts = [x for x in (e.get('timeseries') or []) if isinstance(x, (int, float))]
+                out.append((str(e['ngram']), round(sum(ts) / len(ts) * 1e9, 2) if ts else 0))
+            if out or corp == 'en-2019': return out
+    return None
+
+
+def _ng_freq(phrases):
+    out = {}
+    ps = list(dict.fromkeys(re.sub(r'\s+', ' ', str(p or '').strip().lower()) for p in phrases if p))
+    for i in range(0, len(ps), 10):
+        r = _ng_query(','.join(ps[i:i + 10]))
+        if r is None: continue
+        got = {g.lower(): f for g, f in r}
+        for p in ps[i:i + 10]: out[p] = got.get(p, 0)
+    return out
+
+
+def _col_candidates(w):
+    w = w.lower(); one = len(w.split()) == 1; cands = {}
+    def add(g, f, src):
+        g = re.sub(r'\s+', ' ', g.strip().lower())
+        if w not in g or g == w: return
+        other = [t for t in g.split() if t not in w.split()]
+        if not other or all(t in COL_STOP for t in other): return
+        if g not in cands or cands[g]['f'] < f: cands[g] = {'g': g, 'f': f, 'src': src}
+    if one:
+        ok = 0
+        for pt in ('* ' + w, '* a ' + w, '* the ' + w, w + ' *', w + ' of *', w + ' for *', w + ' to *', w + ' in *', w + ' with *', 'be ' + w + ' *'):
+            r = _ng_query(pt)
+            if r is None: continue
+            ok += 1
+            for g, f in r: add(g, f, 'ngram')
+        dm = []
+        for rel, fmt in (('rel_jjb', '{x} ' + w), ('rel_jja', w + ' {x}')):
+            d = _getj('https://api.datamuse.com/words?' + rel + '=' + urllib.parse.quote(w) + '&max=12')
+            if isinstance(d, list): dm += [fmt.format(x=str(e.get('word') or '')) for e in d if isinstance(e, dict) and e.get('word')]
+        if dm:
+            fr = _ng_freq(dm)
+            for g in dm:
+                if fr.get(g.lower(), 0) > 0: add(g, fr[g.lower()], 'datamuse')
+        if not ok and not dm: return None
+    else:
+        if _ng_query(w) is None: return None
+        for pt in ('* ' + w, w + ' *'):
+            for g, f in (_ng_query(pt) or []): add(g, f, 'ngram')
+    return sorted(cands.values(), key=lambda x: -x['f'])[:45]
+
+
+def colloc(w, ctx='', force=False):
+    """這個字的常見搭配（有快取）"""
+    w = str(w or '').strip()[:60]; k = wkey(w)
+    if not k: raise ValueError('沒有字')
+    with LOCK: old = (_read(COLF(), {}) or {}).get(k)
+    if not force and old: return old
+    if k in COL_BUSY:                                  # 收藏時的背景整理還在跑：等它好
+        for _ in range(180):
+            time.sleep(1)
+            if k not in COL_BUSY: break
+        with LOCK: got = (_read(COLF(), {}) or {}).get(k)
+        if got: return got
+        raise RuntimeError('整理搭配詞失敗，等一下再試')
+    COL_BUSY.add(k)
+    try:
+        cands = _col_candidates(k)
+        if cands is None: raise RuntimeError('連不上語料資料庫（Google Books Ngram／Datamuse），等一下再試')
+        if not cands:
+            rec = {'w': w, 't': int(time.time() * 1000), 'items': [], 'avoid': [], 'none': True}
+        else:
+            lst = '\n'.join('%d. %s  (%s per billion words)' % (i, c['g'], c['f']) for i, c in enumerate(cands))
+            j = _ai_json('These are REAL corpus collocations of the English word "' + w + '" found in Google Books Ngram / Datamuse, with their frequency:\n' + lst + '\n'
+                         + (' The word was seen in this sentence: "' + str(ctx)[:400] + '" (prefer the meaning used there).\n' if ctx else '')
+                         + 'Pick the ones useful for a reader learning English and group them by pattern (e.g. "verb + a reputation", "adjective + reputation", "reputation for + noun"). '
+                         'You may ONLY use numbers from the list above; never add collocations that are not listed. Skip noise (names, fragments, odd meanings). '
+                         'For each picked number give the display form in base form (e.g. "earned a reputation" -> "earn"). 2-4 groups, 2-6 items each, '
+                         'each group with one short natural example sentence using one of its items, and a short Traditional Chinese (台灣用語) meaning.\n'
+                         'Also give 0-2 typical Taiwanese-learner mistakes as {"wrong", "right"} where "right" is a listed collocation.\n'
+                         'Reply with ONLY one JSON object: {"items": [{"type": "verb + a reputation", "pick": [3, 7], "words": ["build", "earn"], "ex": "...", "zh": "..."}], "avoid": [{"wrong": "...", "right": "..."}]}',
+                         dict, 150)
+            items = []
+            for it in (j.get('items') or []):
+                if not isinstance(it, dict): continue
+                pk = it.get('pick') or []; ws = it.get('words') or []; words, freq, grams = [], [], []
+                for n, i in enumerate(pk):
+                    try: c = cands[int(i)]
+                    except Exception: continue
+                    if c['g'] in grams: continue
+                    words.append(str(ws[n] if n < len(ws) and ws[n] else c['g'])[:40]); freq.append(c['f']); grams.append(c['g'])
+                if words: items.append({'type': str(it.get('type') or '')[:60], 'words': words, 'freq': freq, 'grams': grams,
+                                        'ex': str(it.get('ex') or '')[:300], 'zh': str(it.get('zh') or '')[:80]})
+            avoid = []
+            av = [a for a in (j.get('avoid') or []) if isinstance(a, dict) and a.get('wrong') and a.get('right')][:3]
+            if av:
+                fr = _ng_freq([a['wrong'] for a in av] + [a['right'] for a in av])
+                for a in av:
+                    fw, fg = fr.get(str(a['wrong']).lower().strip()), fr.get(str(a['right']).lower().strip())
+                    if fw is None or not fg or fw > fg * 0.2: continue            # 其實也常見的就不列
+                    avoid.append({'wrong': str(a['wrong'])[:60], 'right': str(a['right'])[:60]})
+            rec = {'w': w, 't': int(time.time() * 1000), 'items': items[:5], 'avoid': avoid}
+        with LOCK:
+            c = _read(COLF(), {}) or {}; c[k] = rec; _write(COLF(), c)
+        return rec
+    finally:
+        COL_BUSY.discard(k)
+
+
+def colloc_warm(w, ctx=''):
+    """收藏單字時：在背景先把搭配詞整理好"""
+    def go():
+        try: colloc(w, ctx)
+        except Exception: pass
+    threading.Thread(target=go, daemon=True).start()
+
+
 def vocab_add(w, ctx='', title='', book='', page=None, src='reading'):
     w = re.sub(r'\s+', ' ', str(w)).strip(" .,;:!?\"“”‘’()")[:80]; k = wkey(w)
     if not k: raise ValueError('不是英文單字')
@@ -308,6 +451,7 @@ def vocab_add(w, ctx='', title='', book='', page=None, src='reading'):
             L.insert(0, {'w': w, 'k': k, 'ctx': str(ctx)[:600], 'title': str(title)[:200], 'book': book, 'page': page, 't': int(time.time() * 1000), 'src': src})
             _save_vocab(L)
     m = lookup(w)
+    if not dup and len(k.split()) <= 3: colloc_warm(w, ctx)
     return {'dup': dup, 'k': k, 'meaning': m}
 
 

@@ -1526,6 +1526,9 @@ class H(BaseHTTPRequestHandler):
         # ---------- 字典、單字收藏、句子收藏 ----------
         if p == ['meaning'] and m == 'GET':
             return self.send(200, rv_dict.lookup((qs.get('w') or [''])[0]))
+        if p == ['colloc'] and m == 'GET':             # 搭配詞
+            try: return self.send(200, rv_dict.colloc((qs.get('w') or [''])[0], (qs.get('ctx') or [''])[0], force=(qs.get('force') or [''])[0] == '1'))
+            except (RuntimeError, ValueError) as e: return self.err(502, str(e))
         if p == ['explain'] and m == 'POST':
             j = self.body_json()
             try: return self.send(200, rv_dict.explain(str(j.get('w') or '')[:80], str(j.get('ctx') or '')))

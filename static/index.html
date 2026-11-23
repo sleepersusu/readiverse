@@ -342,6 +342,15 @@ mark.hl.lit{box-shadow:0 0 0 2px var(--ink)}
 .wcard .acts{display:flex;flex-wrap:wrap;gap:6px;align-items:center;border-top:1px solid var(--line);padding-top:10px}
 .wcard .aibox{background:var(--soft);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:4px}
 .wcard .key{font-family:var(--f-read);font-size:19px;font-weight:600;color:var(--ph)}
+.wcard .cols{display:flex;flex-direction:column;gap:9px}
+.wcard .cg .ty{font-family:var(--f-mono);font-size:11.5px;color:var(--vw);margin-bottom:3px}
+.wcard .cg .ws{display:flex;flex-wrap:wrap;gap:4px 6px}
+.wcard .cg .ws span{font-family:var(--f-read);font-size:13.5px;background:var(--soft);border-radius:6px;padding:1px 7px;line-height:1.6}
+.wcard .cg .ws span i{font-style:normal;display:inline-block;height:3px;border-radius:2px;background:var(--vw);opacity:.55;vertical-align:middle;margin-left:5px}
+.wcard .cg .cx{font-family:var(--f-read);font-size:13px;line-height:1.5;margin-top:3px}
+.wcard .cg .cx small{display:block;font-family:var(--f-zh);color:var(--muted);font-size:12.5px}
+.wcard .avd{font-size:13px;line-height:1.6}
+.wcard .avd s{color:var(--muted)}
 .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
 .tag.vwc{color:var(--vw);border-color:var(--vw)} .tag.phc{color:var(--ph);border-color:var(--ph)}
 .saybtn{width:30px;height:30px;min-height:0;padding:0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
@@ -1681,15 +1690,26 @@ function meaningHtml(r){ if(!r) return '<div class="note"><span class="spin"></s
   if(en.defs&&en.defs.length) h+=`<div><div class="lab">英英（Free Dictionary）</div><ol class="defs">${en.defs.slice(0,3).map(d=>`<li><em>${esc(d.pos)}</em>${esc(d.def)}${d.ex?` <span class="note">— ${esc(d.ex)}</span>`:''}</li>`).join('')}</ol></div>`;
   if(r.ex&&r.ex.length) h+=`<div><div class="lab">例句${r.exBy==='ai'?'（AI）':''}</div><div class="exs">${r.ex.map(([a,b])=>`<div>${esc(a)}${b?`<small>${esc(b)}</small>`:''}</div>`).join('')}</div></div>`;
   return h; }
+// 搭配詞：真實語料（Google Books Ngram）裡查得到的，AI 只負責分組、翻中文、造例句
+function colHtml(c){ if(c==null) return ''; if(c==='busy') return '<div><div class="lab">常見搭配</div><div class="note"><span class="spin"></span>查語料、整理搭配詞中…（第一次約 20 秒）</div></div>';
+  if(c.err) return `<div><div class="lab">常見搭配</div><div class="note">${esc(c.err)} <button type="button" class="small" data-colre>再試</button></div></div>`;
+  if(!(c.items||[]).length) return '<div><div class="lab">常見搭配</div><div class="note">語料裡沒有查到常見搭配。</div></div>';
+  const mx=Math.max(1,...c.items.flatMap(it=>it.freq||[]));
+  return `<div><div class="lab">常見搭配 <span style="font-weight:400;letter-spacing:0">（Google Books 語料；長條越長越常用）</span></div><div class="cols">${c.items.map(it=>`<div class="cg"><div class="ty">${esc(it.type)}</div>
+    <div class="ws">${it.words.map((w,i)=>`<span title="${esc((it.grams||[])[i]||'')}：每十億字約 ${esc(String((it.freq||[])[i]||0))} 次">${esc(w)}<i style="width:${Math.max(3,Math.round(26*Math.sqrt(((it.freq||[])[i]||0)/mx)))}px"></i></span>`).join('')}</div>
+    ${it.ex?`<div class="cx">${esc(it.ex)}${it.zh?`<small>${esc(it.zh)}</small>`:''}</div>`:it.zh?`<div class="cx"><small>${esc(it.zh)}</small></div>`:''}</div>`).join('')}</div></div>
+    ${(c.avoid||[]).length?`<div class="avd"><div class="lab">容易用錯</div>${c.avoid.map(a=>`<div>✕ <s>${esc(a.wrong)}</s> → ✓ <b>${esc(a.right)}</b></div>`).join('')}</div>`:''}`; }
 async function saveWord(w,ctx){ try{ const j=await api.post('/api/vocab/add',{w,ctx:ctx||'',title:BOOK?BOOK.meta.title:'',book:BOOK?BOOK.meta.id:'',page:BOOK?PG:null}); const m=((j.meaning||{}).t||'').slice(0,60);
   toast((j.dup?'已經在字典裡了 ◆ ':'已收進字典 ◆ ')+`<b>${esc(w)}</b>`+(m?'：'+esc(m):''),4000); await loadMarks(); if(!$('vLib').hidden) renderLib(true); return j; }catch(e){ toast('收藏失敗：'+esc(e.message)); } }
 async function savePhrase(text,ctx){ try{ const j=await api.post('/api/phrase/add',{text,ctx:ctx||'',title:BOOK?BOOK.meta.title:'',book:BOOK?BOOK.meta.id:'',page:BOOK?PG:null}); toast(j.dup?'這句已經收藏過了':'已收藏句子 ✦ AI 正在整理句型，好了會在文章裡畫底線'); await loadMarks(); if(!j.dup) phrWatch(j.id); }catch(e){ toast('收藏失敗：'+esc(e.message)); } }
 function phrWatch(id,n){ n=n||0; if(n>60) return; setTimeout(async()=>{ try{ const L=await api.get('/api/phrases'), x=L.find(y=>y.id===id||String(y.id).startsWith(id+'-'));
   if(!x||x.status==='error') return loadMarks(); if(x.status==='done') return loadMarks(); }catch(e){} phrWatch(id,n+1); },n<5?2000:4000); }
 // 點文章裡的底線
-async function vwCard(v,rc){ hideCard(); const d=document.createElement('div'); d.className='wcard'; d.setAttribute('role','dialog'); let r=v.m?{t:v.m}:null, ai=null, conf=false;
+async function vwCard(v,rc){ hideCard(); const d=document.createElement('div'); d.className='wcard'; d.setAttribute('role','dialog'); let r=v.m?{t:v.m}:null, ai=null, conf=false, col=null;
+  const loadCol=async(force)=>{ if(v.w.split(/\s+/).length>3) return; col='busy'; if(WCARD===d) draw(); try{ col=await api.get('/api/colloc?w='+encodeURIComponent(v.w)+'&ctx='+encodeURIComponent((v._ctx||v.ctx||'').slice(0,300))+(force?'&force=1':'')); }catch(e){ col={err:e.message}; } if(WCARD===d) draw(); };
   const draw=()=>{ const en=(r&&r.en)||{}; d.innerHTML=`<div class="hd"><span class="hw" style="color:var(--vw)">${esc(v.w)}</span><button type="button" class="ib ghost saybtn" data-say title="發音" aria-label="發音">${ICSAY}</button><span class="grow"></span><span class="tag vwc">◆ 我的單字</span></div>${en.phonetic?`<div class="phon">${esc(en.phonetic)}</div>`:''}
     ${meaningHtml(r)}${ai?`<div class="aibox">${ai==='busy'?'<span class="note"><span class="spin"></span>AI 解釋中…</span>':ai.err?`<span class="err">${esc(ai.err)}</span>`:`<div><b>${esc(ai.pos||'')}</b> ${esc(ai.zh||'')}</div>${ai.note?`<div class="note">${esc(ai.note)}</div>`:''}`}</div>`:''}
+    ${colHtml(col)}
     ${v.note?`<div><div class="lab">我的筆記</div><div>${esc(v.note)}</div></div>`:''}
     ${v.ctx?`<div><div class="lab">收藏時的句子</div><div class="ctx">${ctxBold(v.ctx,v.k)}</div></div>`:''}
     <div class="note">${v.title?`收藏自〈${esc(v.title)}〉`:''}${v.forgot?`・已經忘記 ${v.forgot} 次`:''}</div>
@@ -1699,10 +1719,12 @@ async function vwCard(v,rc){ hideCard(); const d=document.createElement('div'); 
     const q=s=>d.querySelector(s);
     if(q('[data-rev]')) q('[data-rev]').onclick=async()=>{ const j=await api.post('/api/vocab/review',{k:v.k}); v.forgot=j.forgot; toast('已加入複習（忘記 '+j.forgot+' 次）'); draw(); };
     if(q('[data-aiex]')) q('[data-aiex]').onclick=async()=>{ ai='busy'; draw(); try{ ai=await api.post('/api/explain',{w:v.w,ctx:v._ctx||v.ctx}); }catch(e){ ai={err:e.message}; } draw(); };
+    if(q('[data-colre]')) q('[data-colre]').onclick=()=>loadCol(true);
     if(q('[data-del]')) q('[data-del]').onclick=()=>{ conf=true; draw(); };
     if(q('[data-no]')) q('[data-no]').onclick=()=>{ conf=false; draw(); };
     if(q('[data-yes]')) q('[data-yes]').onclick=async()=>{ await api.post('/api/vocab/del',{k:v.k}); hideCard(); toast('已移除'); await loadMarks(); if(!$('vLib').hidden) renderLib(true); }; };
   draw(); placeCard(d,rc);
+  loadCol(false);
   if(!r||!r.en){ try{ r=await api.get('/api/meaning?w='+encodeURIComponent(v.w)); }catch(e){} if(WCARD===d) draw(); } }
 function phCard(x,rc,span){ hideCard(); const d=document.createElement('div'); d.className='wcard'; d.setAttribute('role','dialog'); let conf=false;
   // 這段底線對到的所有收藏（同一個句型可能收藏過好幾次）：刪的時候一起刪，底線才會真的消失

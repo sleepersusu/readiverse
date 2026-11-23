@@ -214,10 +214,27 @@ def claude_argv(c):
 
 
 def ai_cmds(prompt, model=None):
-    """只用 Claude（電腦上登入的 Claude Code）"""
+    """只用 Claude（電腦上登入的 Claude Code）。問題本身不放在命令列，由 run_claude 從標準輸入送"""
     claude = claude_path()
     if not claude: return []
-    return [('Claude Code', [*claude_argv(claude), '-p', '--model', model or ai_model('fast'), prompt])]
+    return [('Claude Code', [*claude_argv(claude), '-p', '--model', model or ai_model('fast')])]
+
+
+_MODEL_BAD = re.compile(r'model.{0,40}(not found|not exist|invalid|unknown|not available|not supported)|(invalid|unknown) model', re.I)
+def run_claude(prompt, model=None, timeout=300, extra=()):
+    """叫 Claude Code 回答一個問題，回傳 subprocess 結果。
+    - 問題從「標準輸入」送進去，不放在命令列：Windows 的命令列有長度上限、中文也可能被弄壞（翻譯一整頁會失敗）
+    - 這台的 Claude Code 太舊、不認得完整的模型名稱（claude-haiku-5-5）：改用簡稱 haiku／sonnet／opus 再試一次"""
+    c = claude_path()
+    if not c: raise RuntimeError('找不到 Claude Code：請先安裝並登入（終端機輸入 claude）')
+    m = model or ai_model('fast')
+    def go(mm):
+        return subprocess.run([*claude_argv(c), '-p', '--model', mm, *extra], input=prompt, capture_output=True, text=True,
+                              encoding='utf-8', errors='replace', timeout=timeout, cwd=os.path.expanduser('~'))
+    r = go(m)
+    alias = re.search(r'claude-(opus|sonnet|haiku)-', m)
+    if alias and r.returncode != 0 and _MODEL_BAD.search((r.stdout or '') + (r.stderr or '')): r = go(alias.group(1))
+    return r
 
 
 def ai_auth():
@@ -320,7 +337,7 @@ def ai_test():
     for kind in ('fast', 'best'):
         m = ai_model(kind); t = time.time()
         try:
-            r = subprocess.run([*claude_argv(c), '-p', '--model', m, 'Reply with exactly: OK'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=90, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
+            r = run_claude('Reply with exactly: OK', m, 90)
             msg = ((r.stdout or '') + (r.stderr or '')).strip()
             ok = r.returncode == 0 and 'OK' in (r.stdout or '')
         except subprocess.TimeoutExpired:
@@ -338,7 +355,7 @@ def ai_json(prompt, want=list, timeout=300, kind='fast'):
     errs = []
     for name, cmd in cmds:
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
+            r = run_claude(prompt, ai_model(kind), timeout)
         except subprocess.TimeoutExpired:
             errs.append('%s 超過 %d 秒沒回應' % (name, timeout)); continue
         out = (r.stdout or '').strip()
@@ -394,7 +411,7 @@ def ai_text(prompt, timeout=240, kind='best'):
     if not cmds: raise RuntimeError('找不到 Claude Code：請先到設定登入 Claude')
     name, cmd = cmds[0]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
+        r = run_claude(prompt, ai_model(kind), timeout)
     except subprocess.TimeoutExpired:
         raise RuntimeError('AI 超過 %d 秒沒回應，請再試一次' % timeout)
     out = (r.stdout or '').strip()
@@ -788,8 +805,7 @@ def read_page_ai(bid, pno, imgdir, kind='fast'):
     if not os.path.exists(img): return {'ok': False, 'error': '沒有頁面圖'}
     c = claude_path()
     if not c: raise RuntimeError('找不到 Claude Code')
-    r = subprocess.run([*claude_argv(c), '-p', '--model', ai_model(kind), '--allowedTools', 'Read', '--add-dir', imgdir, '--', READ_PROMPT % img],
-                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
+    r = run_claude(READ_PROMPT % img, ai_model(kind), 300, ('--allowedTools', 'Read', '--add-dir', imgdir))
     m = re.search(r'\{[\s\S]*\}', r.stdout or '')
     if r.returncode != 0 or not m:
         err = ((r.stderr or r.stdout or '').strip().splitlines() or ['沒有回應'])[-1][:200]
@@ -924,8 +940,7 @@ def proof_page(bid, pno, imgdir, kind='best'):
     payload = json.dumps({'prev_tail': prev[-200:], 'paras': {str(i): t for i, t in enumerate(paras)}}, ensure_ascii=False)
     c = claude_path()
     if not c: raise RuntimeError('找不到 Claude Code')
-    r = subprocess.run([*claude_argv(c), '-p', '--model', ai_model(kind), '--allowedTools', 'Read', '--add-dir', imgdir, '--', PROOF_PROMPT % (img, payload)],
-                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300, stdin=subprocess.DEVNULL, cwd=os.path.expanduser('~'))
+    r = run_claude(PROOF_PROMPT % (img, payload), ai_model(kind), 300, ('--allowedTools', 'Read', '--add-dir', imgdir))
     m = re.search(r'\{[\s\S]*\}', r.stdout or '')
     if r.returncode != 0 or not m:
         err = ((r.stderr or r.stdout or '').strip().splitlines() or ['沒有回應'])[-1][:200]

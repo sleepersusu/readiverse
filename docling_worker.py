@@ -155,7 +155,7 @@ def paras_from_lines(lines, W, H):
     left = statistics.median(sorted(L['x0'] for L in body)[:max(1, len(body) // 2)])
     right = statistics.median(sorted((L['x1'] for L in body), reverse=True)[:max(1, len(body) // 2)])
     gaps = [b['y'] - a['y'] for a, b in zip(lines, lines[1:]) if 4 <= b['y'] - a['y'] < 40]       # 行距（同一行的片段不算）
-    lg = statistics.median(gaps) if gaps else 14
+    lg = sorted(gaps)[len(gaps) // 5] if gaps else 14          # 一般行距：取比較小的那一群（對話多的頁，每行都是一段，中位數會變成段落間距）
     out = []; cur = None; kind = 'p'; prev = None; y0 = 0
     for L in lines:
         s = L['s']; ind = L['x0'] - left; rgap = right - L['x1']
@@ -168,7 +168,8 @@ def paras_from_lines(lines, W, H):
         if prev and re.match(r'^[•●▪◦]', prev['s']) and prev['x0'] + 2 < L['x0'] < prev['x0'] + 30 and not re.match(r'^[•●▪◦]', s): indent_new = False; hang = True   # 條列換行（懸掛縮排）：同一項
         else: hang = False
         if re.match(r'^[•●▪◦]\s', s): indent_new = True                                                              # 「•」開頭：新的一項
-        new = (prev is None or is_head or kind == 'h' or indent_new or (gap > lg * 1.6 and not hang)
+        new = (prev is None or is_head or kind == 'h' or indent_new or (gap > lg * 1.35 and not hang)
+               or (prev and gap > lg * 1.12 and re.search(r'[.!?"”’)]$', prev['s']) and not hang)      # 段落間只多空一點點（小說常見）：上一句結束＋間距稍大
                or (prev and right - prev['x1'] > 40 and re.search(r'[.!?:"”’)]$', prev['s']))   # 上一行沒寫滿、句子也結束了：上一段結束
                or (prev and not hang and (prev['x1'] - prev['x0']) < 0.6 * (right - left)))               # 上一行特別短（目錄、短條列）
         if new:
@@ -197,7 +198,7 @@ def line_page(pg, figs, skip_txt=(), list_items=()):
     lkeys = [re.sub(r'\s+', ' ', x).strip()[:30] for x in list_items if len(x.strip()) >= 6]
     for t, k, y in paras:
         if t.strip().lower() in caps: continue                     # 圖說已經放進圖片裡了
-        if any(t.startswith(kk) for kk in lkeys) and not re.match(r'^([•●▪◦\-–—*]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s', t): t = '• ' + t   # 條列：原書的「•」是畫上去的
+        if any(t.startswith(kk) for kk in lkeys) and not re.match(r'^([•●▪◦❍○◆■□➢✓\-–—*]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s', t): t = '• ' + t   # 條列：原書的「•」是畫上去的
         items.append((y, t))
     for (ft, fb, fl, fr, blk) in figs: items.append((ft - 0.5, blk))
     items.sort(key=lambda x: x[0])
@@ -266,7 +267,7 @@ def main():
                 if isinstance(it, TextItem) and not isinstance(it, (PictureItem, TableItem)) and lab not in SKIP:
                     t = (it.text or '').strip()
                     if t and lab != 'caption':
-                        if lab == 'list_item' and not re.match(r'^([•●▪◦\-–—*]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s', t): t = '• ' + t
+                        if lab == 'list_item' and not re.match(r'^([•●▪◦❍○◆■□➢✓\-–—*]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s', t): t = '• ' + t
                         dseq.setdefault(it.prov[0].page_no, []).append(t)
                 if not isinstance(it, (PictureItem, TableItem)): continue
                 pno = it.prov[0].page_no
@@ -328,7 +329,7 @@ def main():
                 t = (it.text or '').strip()
                 if not t or (lab == 'caption' and t in caps): continue   # 圖說已經放進圖片裡了
                 if lab in ('section_header', 'title'): t = t            # 標題照樣當一段（之後也許另外標示）
-                if lab == 'list_item' and not re.match(r'^([•●▪◦\-–—*]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s', t): t = '• ' + t   # 條列：原書的「•」是畫上去的，補回來
+                if lab == 'list_item' and not re.match(r'^([•●▪◦❍○◆■□➢✓\-–—*]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s', t): t = '• ' + t   # 條列：原書的「•」是畫上去的，補回來
                 pages.setdefault(pg, []).append(t)
         print(json.dumps({'from': a, 'to': b, 'pages': pages}, ensure_ascii=False), flush=True)
 

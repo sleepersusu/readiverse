@@ -319,32 +319,44 @@ def _getj(url, t=12):
         except Exception: return None
 
 
+NG_LOCK = threading.Lock(); NG_LAST = [0.0]
+
+
 def _ng_query(content):
-    """Google Books Ngram：[(片語, 每十億字出現幾次)]；連不上回 None"""
-    for corp in ('en', 'en-2019'):
-        d = _getj('https://books.google.com/ngrams/json?content=' + urllib.parse.quote(content, safe='*,') + '&year_start=2000&year_end=2019&corpus=' + corp + '&smoothing=0')
+    """Google Books Ngram：[(片語, 每十億字出現幾次)]；連不上回 None。
+    Google 短時間查太多次會回 429（暫時擋掉）：全部請求排隊、每次間隔 1.5 秒，被擋就等一下再試"""
+    url = ('https://books.google.com/ngrams/json?content=' + urllib.parse.quote(content, safe='*,')
+           + '&year_start=2000&year_end=2019&corpus=en&smoothing=0')
+    for wait in (0, 5, 12, 25, 40):
+        if wait: time.sleep(wait)
+        with NG_LOCK:
+            gap = 1.5 - (time.time() - NG_LAST[0])
+            if gap > 0: time.sleep(gap)
+            d = _getj(url, 15); NG_LAST[0] = time.time()
         if isinstance(d, list):
             out = []
             for e in d:
                 if not isinstance(e, dict) or not e.get('ngram') or '(All)' in e['ngram'] or '*' in e['ngram']: continue
                 ts = [x for x in (e.get('timeseries') or []) if isinstance(x, (int, float))]
                 out.append((str(e['ngram']), round(sum(ts) / len(ts) * 1e9, 2) if ts else 0))
-            if out or corp == 'en-2019': return out
+            return out
     return None
 
 
 def _ng_freq(phrases):
+    """每個片語的頻率；查不到的（被擋）不會出現在結果裡"""
     out = {}
     ps = list(dict.fromkeys(re.sub(r'\s+', ' ', str(p or '').strip().lower()) for p in phrases if p))
-    for i in range(0, len(ps), 10):
-        r = _ng_query(','.join(ps[i:i + 10]))
+    for i in range(0, len(ps), 12):
+        r = _ng_query(','.join(ps[i:i + 12]))
         if r is None: continue
         got = {g.lower(): f for g, f in r}
-        for p in ps[i:i + 10]: out[p] = got.get(p, 0)
+        for p in ps[i:i + 12]: out[p] = got.get(p, 0)
     return out
 
 
 def _col_candidates(w):
+    """語料裡這個字的常見搭配；Ngram 查不到（連不上、被擋）回 None，不要拿不完整的結果去存"""
     w = w.lower(); one = len(w.split()) == 1; cands = {}
     def add(g, f, src):
         g = re.sub(r'\s+', ' ', g.strip().lower())
@@ -352,13 +364,12 @@ def _col_candidates(w):
         other = [t for t in g.split() if t not in w.split()]
         if not other or all(t in COL_STOP for t in other): return
         if g not in cands or cands[g]['f'] < f: cands[g] = {'g': g, 'f': f, 'src': src}
+    pts = (['* ' + w, '* a ' + w, '* the ' + w, w + ' *', w + ' of *', w + ' for *', w + ' to *', w + ' in *', w + ' with *', 'be ' + w + ' *']
+           if one else ['* ' + w, w + ' *'])
+    r = _ng_query(','.join(pts))                         # 一次查完全部句型
+    if r is None: return None
+    for g, f in r: add(g, f, 'ngram')
     if one:
-        ok = 0
-        for pt in ('* ' + w, '* a ' + w, '* the ' + w, w + ' *', w + ' of *', w + ' for *', w + ' to *', w + ' in *', w + ' with *', 'be ' + w + ' *'):
-            r = _ng_query(pt)
-            if r is None: continue
-            ok += 1
-            for g, f in r: add(g, f, 'ngram')
         dm = []
         for rel, fmt in (('rel_jjb', '{x} ' + w), ('rel_jja', w + ' {x}')):
             d = _getj('https://api.datamuse.com/words?' + rel + '=' + urllib.parse.quote(w) + '&max=12')
@@ -367,11 +378,6 @@ def _col_candidates(w):
             fr = _ng_freq(dm)
             for g in dm:
                 if fr.get(g.lower(), 0) > 0: add(g, fr[g.lower()], 'datamuse')
-        if not ok and not dm: return None
-    else:
-        if _ng_query(w) is None: return None
-        for pt in ('* ' + w, w + ' *'):
-            for g, f in (_ng_query(pt) or []): add(g, f, 'ngram')
     return sorted(cands.values(), key=lambda x: -x['f'])[:45]
 
 
@@ -391,7 +397,7 @@ def colloc(w, ctx='', force=False):
     COL_BUSY.add(k)
     try:
         cands = _col_candidates(k)
-        if cands is None: raise RuntimeError('連不上語料資料庫（Google Books Ngram／Datamuse），等一下再試')
+        if cands is None: raise RuntimeError('Google Books 語料庫暫時連不上（可能查太多次被暫時擋住），過一兩分鐘再試')
         if not cands:
             rec = {'w': w, 't': int(time.time() * 1000), 'items': [], 'avoid': [], 'none': True}
         else:

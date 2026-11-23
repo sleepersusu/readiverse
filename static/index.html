@@ -1172,6 +1172,9 @@ let SUB=0, SUBN=1, SUB_END=false, SUBG=[], RESTORE=null, ANCHOR=null;
 // 記住看到哪裡：第幾頁＋這個畫面的第一段（關掉 App 再打開也會回到這裡）
 function savePos(){ clearTimeout(pgT); pgT=setTimeout(()=>{ if(!BOOK) return; const r=firstShown(), para=r?+(r.dataset.i||r.dataset.fi||0):0;
   api.patch(`/api/books/${BOOK.meta.id}`,{lastPage:PG,lastPara:para}).then(b=>{ if(BOOK&&BOOK.meta.id===b.id) Object.assign(BOOK.meta,b); }).catch(()=>{}); },500); }
+// 原書每一頁的寬度（點），用來算圖在原書上有多大
+const PAGEW={}; const PAGEW0=432;
+function pageWidth(pg){ if(!PDF||PAGEW[pg]) return; PDF.getPage(pg+1).then(p=>{ const v=p.view; PAGEW[pg]=Math.abs(v[2]-v[0])||PAGEW0; if(pg===PG&&MODE==='text') paginate(firstShown()); }).catch(()=>{}); }
 function paginate(keep){
   // 把這一頁的段落分成好幾個畫面。keep＝要放在畫面最上面的那一段（放大縮小字、換視窗大小時，正在讀的那段不會跑掉）
   const sh=$('sheet'), rs=$('rs'); if(MODE!=='text'||!sh||sh.hidden) return;
@@ -1181,14 +1184,24 @@ function paginate(keep){
   if(keep===undefined&&RESTORE!=null){ keep=rows.find(r=>(r.dataset.i||r.dataset.fi)==RESTORE); RESTORE=null; }
   if((!keep||!rows.includes(keep))&&ANCHOR&&ANCHOR.pg===PG&&ANCHOR.book===(BOOK&&BOOK.meta.id)&&!SUB_END) keep=rows.find(r=>(r.dataset.i||r.dataset.fi)==ANCHOR.i);
   // 每一段變成一個或好幾個「片段」：放得下就是整段；太長的段落在行與行之間切開，後半段接到下一個畫面（不用上下捲）
-  // 圖、表格：自己一個畫面，整張縮放到剛好放得下（不跟著文字大小變）
+  // 圖、表格：照原書的大小——寬度是它在原書頁面上佔的比例，放在原本的位置（文字中間的小圖就在文字中間）
+  // 原書整頁的大圖才會大到佔滿一個畫面
+  const pw=PAGEW[PG]||PAGEW0, onlyFig=rows.every(r=>r.querySelector(':scope>.L>.fig'));
+  if(!PAGEW[PG]) pageWidth(PG);
   rows.forEach(r=>{ const f=r.querySelector(':scope>.L>.fig'); if(!f) return; f.style.zoom=''; f.style.marginTop='';
-    const im=f.querySelector('img'), cap=f.querySelector('figcaption'), ch=(cap?cap.offsetHeight:0)+28;
+    const im=f.querySelector('img'), cap=f.querySelector('figcaption'), ch=(cap?cap.offsetHeight:0)+20;
     if(im){ const iw=+im.dataset.w||800, ih=+im.dataset.h||600, colW=f.clientWidth||600;
-      const tw=Math.max(120,Math.min(colW,(avail-ch)*iw/ih,iw));                      // 放大到剛好填滿畫面（最多原始解析度）
+      const frac=Math.min(1,(iw/2)/pw);                                                 // 截圖是 2 倍解析度：iw/2 = 在原書上的寬度（點）
+      let tw=Math.max(80,colW*frac); if(onlyFig) tw=Math.min(colW,(avail-ch)*iw/ih);     // 這一頁只有圖：放大填滿
+      tw=Math.min(tw,(avail-ch)*iw/ih);                                                  // 不要高過畫面
       im.style.width=tw+'px'; im.style.maxHeight='none';
-      f.style.marginTop=Math.max(10,(avail-(tw*ih/iw)-ch)/2)+'px'; }                   // 上下置中
+      if(onlyFig) f.style.marginTop=Math.max(10,(avail-(tw*ih/iw)-ch)/2)+'px'; }
     else { const H=r.offsetHeight; if(H>avail) f.style.zoom=Math.max(0.3,(avail-8)/H); } });
+  // 一個畫面 = 原書的一頁：放不下就先把字稍微縮小（最多縮到 86%），還是放不下才分成好幾個畫面
+  const fit=()=>rows.reduce((a,r)=>a+r.offsetHeight,0)<=avail;
+  sh.style.removeProperty('--fs');
+  if(!fit()){ for(const k of [0.96,0.92,0.89,0.86]){ sh.style.setProperty('--fs',(FS*k)+'px'); if(fit()) break; }
+    if(!fit()) sh.style.removeProperty('--fs'); }
   const U=[]; rows.forEach(r=>{ const H=r.offsetHeight; if(H<=avail||r.querySelector(':scope>.L>.fig')){ U.push({r,off:0,h:Math.min(H,avail)}); return; }
     // 太長的段落：在「真正的行與行之間」切開。每一行的高度不一定一樣（註腳上標、收藏記號會把那一行撐高），所以量每一行實際的位置
     const ends=lineEnds(r), room=avail-8; let st=0;
@@ -1199,19 +1212,17 @@ function paginate(keep){
   const atR=Math.max(0,rows.indexOf(keep)), at=Math.max(0,U.findIndex(u=>u.r===rows[atR]));
   U.forEach(u=>{ u.fig=!!u.r.querySelector(':scope>.L>.fig'); });
   const fwd=from=>{ const G=[]; let cur=[],h=0; for(let k=from;k<U.length;k++){ const u=U[k];
-      if(u.fig){ if(cur.length) G.push(cur); G.push([u]); cur=[]; h=0; continue; }          // 圖表自己一個畫面
-      if(cur.length&&h+u.h>avail){ G.push(cur); cur=[]; h=0; } cur.push(u); h+=u.h; } if(cur.length) G.push(cur); return G; };
+      if(cur.length&&h+u.h>avail){ G.push(cur); cur=[]; h=0; } cur.push(u); h+=u.h; } if(cur.length) G.push(cur); return G; };   // 圖表跟文字一起排（照原書）
   const back=[]; { let cur=[],h=0; for(let k=at-1;k>=0;k--){ const u=U[k];
-      if(u.fig){ if(cur.length) back.unshift(cur); back.unshift([u]); cur=[]; h=0; continue; }
       if(cur.length&&h+u.h>avail){ back.unshift(cur); cur=[]; h=0; } cur.unshift(u); h+=u.h; } if(cur.length) back.unshift(cur); }
   const G=back.concat(fwd(at)); if(!G.length) G.push([]);
   // 標題（章名、小標）不要留在畫面最底下：跟下一段一起移到下一個畫面；下一個畫面放不下就把它最後一段再往後推
   const isHd=u=>u&&!u.cut&&!u.fig&&!!u.r.querySelector(':scope>.L>.para.hd'), gh=g=>g.reduce((x,u)=>x+u.h,0);
   for(let i=0;i<G.length-1;i++){ const g=G[i]; let nx=G[i+1];
     if(!isHd(g[g.length-1])||g.length<2) continue;
-    if(nx[0]&&nx[0].fig){ nx=[]; G.splice(i+1,0,nx); }
+    if(nx[0]&&g[g.length-1].h+nx[0].h>avail) continue;                 // 搬過去也放不下「標題＋下一段」：不搬（不要讓標題自己一個畫面）
     while(g.length>1&&isHd(g[g.length-1])) nx.unshift(g.pop());
-    while(gh(nx)>avail&&nx.length>1){ let n2=G[i+2]; if(!n2||(n2[0]&&n2[0].fig)){ n2=[]; G.splice(i+2,0,n2); } n2.unshift(nx.pop()); } }
+    while(gh(nx)>avail&&nx.length>2){ let n2=G[i+2]; if(!n2){ n2=[]; G.splice(i+2,0,n2); } n2.unshift(nx.pop()); } }
   const atG=G.findIndex(g=>g.includes(U[at]));
   SUBG=G; SUBN=G.length; SUB=SUB_END?SUBN-1:(atG>=0?atG:back.length); SUB_END=false;
   showSub(); }
@@ -1239,6 +1250,17 @@ function showSub(){
   const r=firstShown(); if(r&&BOOK) ANCHOR={book:BOOK.meta.id,pg:PG,i:r.dataset.i||r.dataset.fi};
   if(BOOK) savePos(); }
 function firstShown(){ const u=SUBG[SUB]&&SUBG[SUB][0]; return u&&(u.r||u); }
+let WHEEL={acc:0,lock:0,last:0};
+$('rs').addEventListener('wheel',e=>{
+  if(MODE!=='text'||e.ctrlKey) return;                                   // ctrl＋滾輪是縮放，不管
+  if(e.target.closest('textarea,.R,.toc,.askbox,#allPane')) return;     // 在筆記、目錄裡捲動：照常捲
+  e.preventDefault(); const now=Date.now();
+  if(now<WHEEL.lock){ if(now-WHEEL.last<180) WHEEL.lock=now+260; WHEEL.last=now; return; }   // 觸控板的慣性還在滑：不要一直翻
+  if(now-WHEEL.last>300) WHEEL.acc=0; WHEEL.last=now;
+  const d=Math.abs(e.deltaY)>=Math.abs(e.deltaX)?e.deltaY:e.deltaX;
+  WHEEL.acc+=e.deltaMode===1?d*30:d;
+  if(Math.abs(WHEEL.acc)>=60){ turn(WHEEL.acc>0?1:-1); WHEEL.acc=0; WHEEL.lock=now+450; }
+},{passive:false});
 function turn(d){
   if(!BOOK) return; hidePop(); if(typeof hideCard==='function') hideCard();
   if(MODE==='text'&&d>0&&SUB<SUBN-1){ SUB++; slide(1); return showSub(); }

@@ -60,6 +60,7 @@ jobs:
         shell: pwsh
         run: |
           $env:READIVERSE_NO_DOCLING = "1"
+          $env:READIVERSE_GH_TOKEN = "${{ github.token }}"
           $env:READIVERSE_LIB = Join-Path $env:RUNNER_TEMP "rv-lib"
           $p = Start-Process -FilePath "dist/Readiverse/Readiverse.exe" -ArgumentList "--server" -PassThru -WorkingDirectory "dist/Readiverse"
           $ok = $false
@@ -164,11 +165,11 @@ jobs:
 
       - name: Smoke test
         run: |
-          READIVERSE_NO_DOCLING=1 READIVERSE_LIB="$RUNNER_TEMP/rv-lib" dist/Readiverse.app/Contents/MacOS/Readiverse --server &
+          READIVERSE_GH_TOKEN="${{ github.token }}" READIVERSE_NO_DOCLING=1 READIVERSE_LIB="$RUNNER_TEMP/rv-lib" dist/Readiverse.app/Contents/MacOS/Readiverse --server &
           for i in $(seq 30); do sleep 2; curl -sf http://127.0.0.1:8780/api/caps && break; done
           curl -sf http://127.0.0.1:8780/ | grep -q Readiverse || { echo "::error::首頁沒有載入"; exit 1; }
-          U=$(curl -sf "http://127.0.0.1:8780/api/update?force=1"); echo "$U"
-          echo "$U" | grep -q '"checkError": ""' || { echo "::error::打包版連不上 GitHub 查新版"; exit 1; }
+          ok=0; for i in 1 2 3 4; do U=$(curl -sf "http://127.0.0.1:8780/api/update?force=1"); echo "$U"; echo "$U" | grep -q '"checkError": ""' && { ok=1; break; }; sleep 15; done
+          [ $ok = 1 ] || { echo "::error::打包版連不上 GitHub 查新版"; exit 1; }
           kill %1 || true
 
       - name: Zip (auto-update) and dmg (first install)

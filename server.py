@@ -1803,7 +1803,8 @@ def _ssl_ctx():
 
 
 def _open(url, timeout=30, accept=None):
-    req = urllib.request.Request(url, headers={'User-Agent': 'readiverse', **({'Accept': accept} if accept else {})})
+    tok = os.environ.get('READIVERSE_GH_TOKEN', '')                 # 只有 GitHub 打包時的自動測試會設（避開查詢次數限制）
+    req = urllib.request.Request(url, headers={'User-Agent': 'readiverse', **({'Accept': accept} if accept else {}), **({'Authorization': 'Bearer ' + tok} if tok and 'api.github.com' in url else {})})
     return urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx())
 
 

@@ -492,11 +492,12 @@ def clean_pages(pages, frozen=()):
         pages[p] = out
     # 2) 頁首頁尾：很多頁的開頭／結尾都出現的短句（書名、章名、「78 EMOTIONALLY CHARGED」）
     cnt = {}
-    for pg in pages:
+    for p, pg in enumerate(pages):
         T = [x for x in pg if is_text(x)]
         for k in {_hkey(x) for x in T[:2] + T[-2:] if _headish(x)}:
-            cnt[k] = cnt.get(k, 0) + 1
-    heads = {k for k, c in cnt.items() if c >= 3 and len(k) >= 6}
+            cnt.setdefault(k, []).append(p)
+    # 頁首：在很多頁出現，而且是一頁接一頁（或隔一頁）重複；散落在書裡不同地方的（目錄、章名、注釋標題）不算
+    heads = {k for k, ps in cnt.items() if len(ps) >= 3 and len(k) >= 6 and sum(1 for a, b in zip(ps, ps[1:]) if b - a <= 2) >= 2}
     if heads:
         seen = set()                                   # 第一次出現的留著（通常是真正的章名），之後重複的才是頁首
         for p, pg in enumerate(pages):

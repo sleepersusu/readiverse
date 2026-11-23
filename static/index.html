@@ -540,11 +540,14 @@ table.list .rprog{width:100%;min-width:110px}
 .sheet .r2{grid-template-columns:minmax(0,1fr)!important}
 .sheet .r2>.R,.sheet .gut,#pgNote{display:none!important}
 .sheet .r2>.L{padding-right:0!important}
-.spread.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:64px;position:relative}
-.spread.two::before{content:"";position:absolute;top:0;bottom:0;left:50%;width:1px;background:var(--pline,var(--line))}
-.spread.two .side{min-width:0;position:relative}
+.spread.two{column-count:2;column-gap:64px;column-fill:auto;column-rule:1px solid var(--pline,var(--line));overflow:hidden;position:relative}
+.spread.two .side{break-before:column;-webkit-column-break-before:always}
+.spread.two .side:first-child{break-before:auto;-webkit-column-break-before:auto}
+.spread.two .rc{break-inside:avoid-column;-webkit-column-break-inside:avoid}
+.spread.two .rc:has(.ptx){break-inside:auto;-webkit-column-break-inside:auto}
 .spread.two .para{max-width:none}
-.sheet.two>.rhead,.sheet.two>.rf{display:none}
+.sheet.two>.rhead .ptop{padding-bottom:4px}
+.sheet.two>.rf .rfoot{padding-top:4px}
 .sheet.two .ptx{line-height:1.55}
 .sheet.two .para{margin-bottom:.15em}
 .sheet.two{padding-top:14px}
@@ -1216,24 +1219,36 @@ const PAGEW={}; const PAGEW0=432;
 function pageWidth(pg){ if(!PDF||PAGEW[pg]) return; PDF.getPage(pg+1).then(p=>{ const v=p.view; PAGEW[pg]=Math.abs(v[2]-v[0])||PAGEW0; if(pg===PG&&MODE==='text') paginate(firstShown()); }).catch(()=>{}); }
 // 雙頁：兩邊各是原書的一頁。圖照原書的比例；放不下就兩邊一起把字縮小（最多到 78%），還是放不下那一邊才可以捲動
 function paginateTwo(sh,avail){
-  const sides=[...sh.querySelectorAll('.side')];
-  sides.forEach(sd=>{ const p=+sd.dataset.side, pw=PAGEW[p]||PAGEW0; if(!PAGEW[p]) pageWidth(p); sd.classList.remove('over');
+  // 雙頁 = 兩欄：左欄放第 N 頁、右欄放第 N+1 頁。字太大放不下時，文字接著排到下一欄、下一個畫面（像電子書，不用上下捲）
+  const sp=sh.querySelector('.spread.two'), sides=[...sh.querySelectorAll('.side')], gap=64;
+  sp.style.height=Math.max(200,avail-4)+'px';
+  const colW=()=>(sp.clientWidth-gap)/2;
+  sides.forEach(sd=>{ const p=+sd.dataset.side, pw=PAGEW[p]||PAGEW0; if(!PAGEW[p]) pageWidth(p);
     const rows=[...sd.querySelectorAll(':scope>.rc')], onlyFig=rows.length&&rows.every(r=>r.querySelector('.fig'));
     rows.forEach(r=>{ const f=r.querySelector(':scope>.L>.fig'); if(!f) return; f.style.zoom=''; f.style.marginTop='';
       const im=f.querySelector('img'), cap=f.querySelector('figcaption'), ch=(cap?cap.offsetHeight:0)+20;
-      if(im){ const iw=+im.dataset.w||800, ih=+im.dataset.h||600, colW=f.clientWidth||400;
-        let tw=Math.max(60,colW*Math.min(1,(iw/2)/pw)); if(onlyFig) tw=colW; tw=Math.min(tw,(avail-ch-30)*iw/ih);
+      if(im){ const iw=+im.dataset.w||800, ih=+im.dataset.h||600, cw=colW();
+        let tw=Math.max(60,cw*Math.min(1,(iw/2)/pw)); if(onlyFig) tw=cw; tw=Math.min(tw,(avail-ch-40)*iw/ih);
         im.style.width=tw+'px'; im.style.maxHeight='none'; } }); });
-  const hOf=sd=>[...sd.querySelectorAll(':scope>.rc')].reduce((a,r)=>a+r.offsetHeight,0);
-  const over=()=>sides.some(sd=>hOf(sd)>avail-26);
+  const cols=()=>Math.max(1,Math.round((sp.scrollWidth+gap)/(colW()+gap)));
+  // 先試著把兩頁都放進一個畫面（字最多縮到你設定的 80%）；還是放不下就照你的字級，多分幾個畫面
   sh.style.removeProperty('--fs');
-  if(over()) for(const k of [0.95,0.9,0.86,0.82,0.78,0.74,0.7,0.66]){ sh.style.setProperty('--fs',Math.max(12,FS*k)+'px'); if(!over()) break; }
-  sides.forEach(sd=>{ if(hOf(sd)>avail-26){ sd.classList.add('over'); sd.style.height=(avail-6)+'px'; } else sd.style.height=''; });
-  SUBG=[[...sh.querySelectorAll('.side>.rc')].map(r=>({r,off:0,h:r.offsetHeight}))]; SUBN=1; SUB=0; SUB_END=false;
-  const n=nPages(), last=sides.length?+sides[sides.length-1].dataset.side:PG, V=visPages(), first=PG<=V[0], end=last>=V[V.length-1];
+  const want=sides.length;                                   // 兩頁 = 兩欄剛好一個畫面
+  if(cols()>want){ let ok=false; for(const k of [0.95,0.9,0.85,0.8,0.75,0.7]){ if(FS*k<12) break; sh.style.setProperty('--fs',(FS*k)+'px'); if(cols()<=want){ ok=true; break; } }
+    if(!ok) sh.style.removeProperty('--fs'); }
+  SUBN=Math.max(1,Math.ceil(cols()/2)); SUB=SUB_END?SUBN-1:Math.min(SUB,SUBN-1); SUB_END=false;
+  showTwo(); }
+function showTwo(){
+  const sh=$('sheet'), sp=sh.querySelector('.spread.two'); if(!sp) return; const gap=64;
+  sp.scrollLeft=SUB*(sp.clientWidth+gap);
+  const sides=[...sh.querySelectorAll('.side')], n=nPages(), last=sides.length?+sides[sides.length-1].dataset.side:PG, V=visPages();
+  const first=PG<=V[0]&&SUB<=0, end=last>=V[V.length-1]&&SUB>=SUBN-1;
   sh.querySelectorAll('[data-turn="-1"]').forEach(b=>b.disabled=first); sh.querySelectorAll('[data-turn="1"]').forEach(b=>b.disabled=end);
   $('prev').disabled=first; $('next').disabled=end;
-  const fo=sh.querySelector('.folio'); if(fo) fo.innerHTML=`— ${PG+1}${last!==PG?'・'+(last+1):''} —<span class="pgpct">${Math.round((last+1)/Math.max(1,n)*100)}%</span>`;
+  // 這個畫面看到的第一段（記住讀到哪裡）
+  const L=sp.getBoundingClientRect().left, rows=[...sp.querySelectorAll('.rc')].filter(r=>{ const x=r.getBoundingClientRect().left; return x>=L-5&&x<L+sp.clientWidth; });
+  SUBG=[rows.map(r=>({r,off:0,h:r.offsetHeight}))];
+  const fo=sh.querySelector('.folio'); if(fo) fo.innerHTML=`— ${PG+1}${last!==PG?'・'+(last+1):''} —${SUBN>1?`<span class="pgsub">${SUB+1}/${SUBN}</span>`:''}<span class="pgpct">${Math.round((last+1)/Math.max(1,n)*100)}%</span>`;
   rs_scrollTop0(); if(BOOK) savePos(); }
 function rs_scrollTop0(){ const rs=$('rs'); rs.classList.remove('tall'); rs.scrollTop=0; }
 function paginate(keep){
@@ -1325,7 +1340,8 @@ $('rs').addEventListener('wheel',e=>{
 },{passive:false});
 function turn(d){
   if(!BOOK) return; hidePop(); if(typeof hideCard==='function') hideCard();
-  if(MODE==='text'&&TWO){ const V=visPages(), pos=V.indexOf(BASE), to=V[pos+2*d]; if(to==null) return; return showPage(to,d); }
+  if(MODE==='text'&&TWO){ if(d>0&&SUB<SUBN-1){ SUB++; slide(1); return showTwo(); } if(d<0&&SUB>0){ SUB--; slide(-1); return showTwo(); }
+    const V=visPages(), pos=V.indexOf(BASE), to=V[pos+2*d]; if(to==null) return; if(d<0) SUB_END=true; return showPage(to,d); }
   if(MODE==='text'&&d>0&&SUB<SUBN-1){ SUB++; slide(1); return showSub(); }
   if(MODE==='text'&&d<0&&SUB>0){ SUB--; slide(-1); return showSub(); }
   const V=visPages(), pos=V.indexOf(PG), to=MODE==='text'?V[pos+d]:PG+d;

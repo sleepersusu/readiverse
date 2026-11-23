@@ -224,7 +224,7 @@ def lookup(w):
         if en is not None:
             with LOCK:
                 cache = _read(CACHEF(), {}); c = cache.get(k) or c; c['en'] = en; cache[k] = c; _write(CACHEF(), cache)
-    if c and (c.get('src') == 'cambridge' or time.time() - c.get('tried', 0) < 7 * 86400): return c
+    if c and (c.get('src') in ('cambridge', 'ai') or time.time() - c.get('tried', 0) < 7 * 86400): return c
     res, offline = None, False
     for cand in candidates(k)[:3]:
         r = cambridge(cand)
@@ -235,6 +235,14 @@ def lookup(w):
         t = local_lookup(k)
         res = {'t': t, 'src': 'local' if t else 'none', 'tried': time.time()}
         if offline: res['offline'] = True
+    if not res.get('t') and len(k.split()) <= 5:                 # 字典都查不到：請 AI 解釋（記下來，下次直接用）
+        try:
+            j = explain(k)
+            if j.get('zh'):
+                res.update(t=('%s %s' % (j.get('pos') or '', j['zh'])).strip(), src='ai')
+                if j.get('note'): res['note'] = j['note']
+                if j.get('ex') and not res.get('ex'): res['ex'] = [[str(a), str(b)] for a, b in j['ex'] if a][:2]; res['exBy'] = 'ai'
+        except Exception: pass
     if len(k.split()) <= 3:
         en = freedict(k)
         if en is not None: res['en'] = en

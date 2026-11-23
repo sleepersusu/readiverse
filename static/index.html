@@ -1677,7 +1677,7 @@ document.addEventListener('mousedown',e=>{ if(WCARD&&!e.target.closest('.wcard')
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&WCARD){ hideCard(); e.stopPropagation(); } },true);
 function ctxBold(ctx,w){ const k=String(w||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); return esc(ctx).replace(new RegExp('('+k+"[a-z]{0,3})",'i'),'<b>$1</b>'); }
 function meaningHtml(r){ if(!r) return '<div class="note"><span class="spin"></span>載入中…</div>'; const en=r.en||{};
-  let h=r.t?`<div class="zhm">${esc(r.t)}</div>`:'<div class="note">本機字典查不到這個字，可以按「AI 解釋」。</div>';
+  let h=r.t?`<div class="zhm">${esc(r.t)}${r.src==='ai'?' <span class="note">（字典沒有這個字，AI 解釋）</span>':''}</div>${r.note?`<div class="note">${esc(r.note)}</div>`:''}`:'<div class="note">字典和 AI 都查不到這個字（Claude 沒登入的話，到設定登入後再試）。</div>';
   if(en.defs&&en.defs.length) h+=`<div><div class="lab">英英（Free Dictionary）</div><ol class="defs">${en.defs.slice(0,3).map(d=>`<li><em>${esc(d.pos)}</em>${esc(d.def)}${d.ex?` <span class="note">— ${esc(d.ex)}</span>`:''}</li>`).join('')}</ol></div>`;
   if(r.ex&&r.ex.length) h+=`<div><div class="lab">例句${r.exBy==='ai'?'（AI）':''}</div><div class="exs">${r.ex.map(([a,b])=>`<div>${esc(a)}${b?`<small>${esc(b)}</small>`:''}</div>`).join('')}</div></div>`;
   return h; }

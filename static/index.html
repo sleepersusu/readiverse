@@ -557,6 +557,9 @@ table.list .rprog{width:100%;min-width:110px}
 /* 閱讀頁的段落用一般區塊（不是 grid）：Safari／App 的分欄遇到 grid 會把一行字從中間切成兩半，分在兩欄 */
 .sheet .r2{display:block}
 .spread.two{orphans:2;widows:2}
+.sres{margin-top:26px}.sres .shd{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}.sres h2{margin:0;font-size:18px}.sres .all{margin-left:auto}
+.slist{display:flex;flex-direction:column;gap:6px}.sitem{padding:9px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;background:var(--surface)}.sitem:hover{background:var(--soft)}
+.sitem b{font-weight:600}.sctx{font-family:var(--f-read);font-size:13.5px;color:var(--muted);margin-top:3px;line-height:1.5}.sctx b,.sitem .note b{color:var(--ink)}
 .para.tl{margin:.1em 0;font-size:1em;font-weight:500}
 .sheet .r2>.R,.sheet .gut,#pgNote{display:none!important}
 .sheet .r2>.L{padding-right:0!important}
@@ -727,6 +730,21 @@ function pollLib(){ clearTimeout(libPollT); const anyBusy=LIB.books.some(busy);
       if(libSig(LIB)!==before||!anyBusy) renderLib(true);                 // 真的有東西變了才重畫（書庫的時間戳變了＝一定有東西變了）
       else { LIB.books.forEach(b=>document.querySelectorAll(`[data-st="${b.id}"]`).forEach(el=>{ const h=aiTag(b); if(el.innerHTML!==h) el.innerHTML=h; })); pollLib(); }
     }catch(e){ pollLib(); } },anyBusy?4000:3000); }
+// 首頁搜尋：除了書，也找收藏的單字、句子、筆記
+function searchHits(q){
+  const has=(...a)=>a.join(' ').toLowerCase().includes(q);
+  const W=(VLIST||[]).filter(v=>has(v.w,v.m,v.ctx,v.title)), P=(PLIST||[]).filter(x=>has(x.text,x.key,x.zh,x.pattern,x.title)), N=(NLIST||[]).filter(n=>has(n.quote,n.text,n.title));
+  return {W,P,N,n:W.length+P.length+N.length}; }
+function searchHtml(q){
+  if(NLIST===null&&!searchHtml.loading){ searchHtml.loading=true; api.get('/api/notes').then(L=>{ NLIST=L; searchHtml.loading=false; if($('q').value.trim()) renderLib(true); }).catch(()=>{ searchHtml.loading=false; }); }
+  const {W,P,N}=searchHits(q), more=(f,n)=>n>6?`<button type="button" class="all" data-fq="${f}">查看全部 ${n} ›</button>`:'';
+  const hl=t=>{ t=esc(t||''); const k=t.toLowerCase().indexOf(esc(q).toLowerCase()); return k<0?t:t.slice(0,k)+'<b>'+t.slice(k,k+esc(q).length)+'</b>'+t.slice(k+esc(q).length); };
+  const cut=(t,n)=>{ t=String(t||''); const k=t.toLowerCase().indexOf(q); const a=Math.max(0,k-Math.floor(n/3)); return (a?'…':'')+t.slice(a,a+n)+(t.length>a+n?'…':''); };
+  let h='';
+  if(W.length) h+=`<section class="sres"><div class="shd"><h2 style="color:var(--vw)">單字</h2><span class="cnt">${W.length}</span>${more('vocab',W.length)}</div><div class="slist">${W.slice(0,6).map(v=>`<div class="sitem" data-fq="vocab"><b lang="en">${hl(v.w)}</b> <span class="note">${hl(cut(v.m,60))}</span>${v.ctx?`<div class="sctx" lang="en">${hl(cut(v.ctx,140))}</div>`:''}</div>`).join('')}</div></section>`;
+  if(P.length) h+=`<section class="sres"><div class="shd"><h2 style="color:var(--ph)">句子</h2><span class="cnt">${P.length}</span>${more('phr',P.length)}</div><div class="slist">${P.slice(0,6).map(x=>`<div class="sitem" data-fq="phr"><b lang="en">${hl(x.key||cut(x.text,80))}</b> <span class="note">${hl(x.zh||'')}</span><div class="sctx" lang="en">${hl(cut(x.text,140))}</div></div>`).join('')}</div></section>`;
+  if(N.length) h+=`<section class="sres"><div class="shd"><h2>筆記</h2><span class="cnt">${N.length}</span>${more('notes',N.length)}</div><div class="slist">${N.slice(0,6).map(n=>`<div class="sitem" data-nopen="${esc(n.bid)}" data-pg="${n.page}" data-i="${n.i}" data-nid="${n.kind==='note'?esc(n.id):''}" role="button" tabindex="0"><span class="note">${esc(n.title||'')}・第 ${n.page+1} 頁</span>${n.quote?`<div class="sctx" lang="en">${hl(cut(n.quote,140))}</div>`:''}${n.text?`<div>${hl(cut(n.text,140))}</div>`:''}</div>`).join('')}</div></section>`;
+  return h; }
 function prog(b){ return b.pages?Math.min(1,(b.lastPage+1)/b.pages):0; }
 const pct=b=>b.status==='done'?100:Math.round(prog(b)*100);
 // 閱讀進度：斜紋進度條＋百分比（樣式跟開機畫面的 Loading 一樣）
@@ -806,7 +824,8 @@ function renderLib(soft){
     el.innerHTML=`<div class="page"><div class="hd"><button type="button" class="ib" data-f="home" title="回首頁" aria-label="回首頁">${IC.l}</button><h1>${q?`搜尋「${esc($('q').value.trim())}」`:esc(filterName(FILTER))}</h1><span class="cnt note">${L.length} 本</span><span class="grow"></span>
       <select id="sort" aria-label="排序"><option value="opened">最近閱讀</option><option value="added">最近加入</option><option value="title">書名</option><option value="progress">閱讀進度</option></select>
 </div>
-      ${!L.length?'<div class="empty"><b>沒有符合的書</b><span class="note">換個分類或搜尋字試試。</span></div>':VIEW==='list'?listHtml(L):`<div class="wall">${L.map(posterCard).join('')}</div>`}</div>`;
+      ${!L.length?(q&&searchHits(q).n?'<div class="note" style="padding:4px 0 8px">沒有符合的書</div>':'<div class="empty"><b>沒有符合的書</b><span class="note">換個分類或搜尋字試試。</span></div>'):VIEW==='list'?listHtml(L):`<div class="wall">${L.map(posterCard).join('')}</div>`}
+      ${q?searchHtml(q):''}</div>`;
     $('sort').value=SORT; $('sort').onchange=e=>{ SORT=e.target.value; LS.set('sort',SORT); renderLib(); };
   }
   if(keep) el.querySelectorAll('.track').forEach((t,i)=>{ t.scrollLeft=keep[i]||0; });
@@ -829,6 +848,7 @@ $('nav').onclick=e=>{ const b=e.target.closest('[data-f]'); if(b){ if(BOOK) clos
 $('vLib').addEventListener('click',async e=>{ const t=e.target;
   const sc=t.closest('[data-scroll]'); if(sc){ const tr=sc.parentNode.querySelector('.track'); tr.scrollBy({left:+sc.dataset.scroll*tr.clientWidth*0.85,behavior:'smooth'}); return; }
   const st=t.closest('[data-stab]'); if(st){ LS.set('shelfTab',st.dataset.stab); return renderLib(true); }
+  const fq=t.closest('[data-fq]'); if(fq){ FILTER=fq.dataset.fq; LS.set('filter2',FILTER); renderLib(); scrollTo(0,0); return; }   // 搜尋結果：換到單字／句子／筆記頁，搜尋字留著
   const f=t.closest('[data-f]'); if(f) return setFilter(f.dataset.f);
   if(t.closest('[data-settings]')) return openSettings();
   if(t.closest('[data-addcat]')){ const v=(prompt('新分類的名字')||'').trim(); if(!v) return; if(LIB.categories.includes(v)) return toast('已經有這個分類了'); const prof=LIB.profile; LIB=await api.put('/api/categories',{categories:[...LIB.categories,v]}); LIB.profile=prof; return renderLib(true); }

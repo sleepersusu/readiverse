@@ -98,7 +98,7 @@ def _rule_bases(k, strong_only=False):
         if len(b) > 2 and b[-1] == b[-2] and b[-1] not in 'lsz': c.append((b[:-1], True))
         c += [(b + 'e', False), (b, False)]
     if k.endswith('ied') and len(k) > 4: c.append((k[:-3] + 'y', True))
-    if k.endswith('ed') and len(k) > 4:
+    if k.endswith('ed') and len(k) > 3:
         b = k[:-2]
         if len(b) > 2 and b[-1] == b[-2] and b[-1] not in 'lsz': c.append((b[:-1], True))
         c += [(k[:-1], False), (b, False)]
@@ -132,7 +132,19 @@ def _senses(e):
     return len([x for x in re.split(r'[,，]', first) if x.strip()])
 
 
-LOCAL_V = 2                      # 本機字典查法的版本：改了查法就加一，舊的快取會重查
+LOCAL_V = 3                      # 本機字典查法的版本：改了查法就加一，舊的快取會重查
+
+
+_POS = {}
+def _verb_mostly(k):
+    """這個字在真實文章裡大多當動詞用嗎（Google Books Ngram 的詞性統計）？
+    bored、tired 多半是形容詞；getting、asked 幾乎都是動詞。連不上回 None（照原本的規則）"""
+    if k in _POS: return _POS[k]
+    r = _ng_query(','.join(k + '_' + t for t in ('VERB', 'ADJ', 'NOUN')))
+    if r is None: return None
+    f = {g.split('_')[-1]: v for g, v in r}
+    if not f: _POS[k] = None; return None
+    _POS[k] = f.get('VERB', 0) >= max(f.get('ADJ', 0), f.get('NOUN', 0)); return _POS[k]
 
 
 def local_lookup(k):
@@ -144,18 +156,22 @@ def local_lookup(k):
     own = D.get(k, '')
     m = REF_RE.search(own or '')
     base = IRREG.get(k) or (m.group(1) if m and m.group(1) != k else '')
-    verbish = bool(base) or k.endswith(('ing', 'ed'))
-    if not base:
+    verbish = bool(base) or k.endswith(('ing', 'ed')); guessed = False
+    selfverb = bool(own) and bool(re.search(r'\bv[ti]?\.', own)) and not m                            # need、feed、proceed：自己就是動詞原形，不要再猜原形
+    if not base and not selfverb:
         for b, strong in _rule_bases(k):
-            if b == k or b not in D or len(b) < 3: continue
-            if k.endswith(('ing', 'ed')) and not strong and not re.search(r'\bv[ti]?\.', D[b]): continue   # -ing／-ed 的原形要是動詞
+            if b == k or b not in D or len(b) < 3 or D[b].lstrip().startswith('['): continue                # 只有專業術語的（[醫]翻放機）不算
+            if k.endswith(('ing', 'ed')) and not strong and not re.search(r'\bv[ti]?\.', D[b]) and not _verb_mostly(k): continue   # -ing／-ed 的原形要是動詞（字典沒寫，但實際上多半當動詞用也算）
+            guessed = not strong
             if own and not k.endswith(('ing', 'ed')): break                                              # 複數、比較級：自己的解釋就夠了
             base = b; break
     if base and base in D and base != k:
         bm = D[base]
         if not own or re.match(r'^\s*[a-z]+\s*的', own): return '（%s）%s' % (base, bm)                    # went → （go）…
         if not verbish: return own
-        if _senses(own) >= 3 and k not in IRREG: return '%s ／ （%s）%s' % (own, base, bm)                 # meaning：自己的意思比較重要
+        vm = _verb_mostly(k) if k.endswith(('ing', 'ed')) or k in IRREG else None
+        if vm is False: return own if guessed else '%s ／ （%s）%s' % (own, base, bm)                    # bored、building：多半當形容詞／名詞（照拼字猜的原形就不附了：seed≠see、evening≠even）
+        if vm is None and _senses(own) >= 3 and k not in IRREG: return '%s ／ （%s）%s' % (own, base, bm)   # 連不上：自己的意思很完整就放前面
         return '（%s）%s ／ %s：%s' % (base, bm, k, own)                                                    # getting → （get）…
     if own: return own
     for c in candidates(k)[1:]:

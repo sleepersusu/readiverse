@@ -810,6 +810,8 @@ def read_page_ai(bid, pno, imgdir, kind='fast'):
 
 PROOF_PROMPT = ("Read the image file %s. It is one page of a printed book.\n"
     "Below is the text we extracted. \"prev_tail\" is the end of the previous page's last paragraph (this page may start in the middle of it). "
+    "IMPORTANT: when a paragraph runs from the previous page onto this one, we have ALREADY joined this page's first lines onto prev_tail — "
+    "so text at the top of the image may appear at the END of prev_tail instead of in paragraph 0. That is correct: it is NOT missing, never add it again. "
     "\"paras\" are the text paragraphs on this page, keyed by paragraph index (figures and tables are handled separately; ignore their contents).\n"
     "Proofread word by word against the image, IN READING ORDER. Report ONLY real differences in the body text: missing words or sentences, misread words, "
     "words or sentences in the wrong place or order (for example a word that belongs at the end of prev_tail but was put at the start of paragraph 0 — "
@@ -834,7 +836,19 @@ def render_pages(bid, nums):
     return out
 
 
-def apply_proof(pages, pno, j, frozen):
+def _adds_dup(old, new, raw):
+    """這個修正會不會讓文字「重複一段」（AI 把已經在的文字又補一次）。原書本來就重複的不算"""
+    def reps(t):
+        out = set()
+        for m in _DUP_RE.finditer(t):
+            if len(m.group(1).split()) >= 4: out.add(re.sub(r'\s+', ' ', m.group(0)).strip())
+        for m in _DUPW_RE.finditer(t): out.add(m.group(0))
+        return out
+    newr = reps(new) - reps(old)
+    return any(not raw or x not in raw for x in newr)
+
+
+def apply_proof(pages, pno, j, frozen, raw=None):
     """把 AI 的修正套進 pages（原地改）。AI 給的段落編號不一定準：
     先找它說的那段，找不到就在這頁（和上一頁最後一段）找唯一出現的地方。回傳 (applied, failed)"""
     applied, failed = [], []
@@ -871,7 +885,9 @@ def apply_proof(pages, pno, j, frozen):
         if len(core) >= 12 and len(W(core)) >= 2:                          # 會拿掉好幾個字：只准刪「別處也有一模一樣」的重複
             core = ' '.join(core.split()); nb = [x for x in spots() if x != t] + [(pno + 1, i) for i, x in enumerate(pages[pno + 1] if pno + 1 < len(pages) else []) if is_text(x)]
             if not any(core in pages[x[0]][x[1]] for x in nb): failed.append(f); continue
-        pages[t[0]][t[1]] = pages[t[0]][t[1]].replace(find, rep_); applied.append(f)
+        nt = pages[t[0]][t[1]].replace(find, rep_)
+        if _adds_dup(pages[t[0]][t[1]], nt, raw): failed.append(dict(f, why='would duplicate text')); continue   # 把已經在的字又補一次：不准
+        pages[t[0]][t[1]] = nt; applied.append(f)
     for f in j.get('inserts') or []:
         after, ins = str(f.get('after') or ''), str(f.get('insert') or '').strip()
         if not after or not ins or len(ins) > 1500: failed.append(f); continue
@@ -884,7 +900,9 @@ def apply_proof(pages, pno, j, frozen):
         left, right = txt[:k].rstrip(' '), txt[k:].lstrip(' ')
         pre = '' if ins[:1] in '.,;:!?)]”’' else ' '                          # 插入的字前後補空格（標點不補）
         post = '' if not right or right[:1] in '.,;:!?)]”’' else ' '
-        pages[t[0]][t[1]] = left + pre + ins + post + right
+        nt = left + pre + ins + post + right
+        if _adds_dup(txt, nt, raw): failed.append(dict(f, why='would duplicate text')); continue
+        pages[t[0]][t[1]] = nt
         applied.append(f)
     if applied:
         for q in {pno - 1, pno}:                                           # 被清空的段落拿掉
@@ -920,7 +938,7 @@ def proof_page(bid, pno, imgdir, kind='best'):
     with LOCK:
         pages = read_json(os.path.join(d, 'pages.json')) or []
         frozen = used_pages(read_json(os.path.join(d, 'state.json'), {}))
-        applied, failed = apply_proof(pages, pno, j, frozen)
+        applied, failed = apply_proof(pages, pno, j, frozen, _raw_norm(d))
         if applied: save_pages(d, pages)
     return {'ok': bool(j.get('ok')) and not failed, 'applied': applied, 'failed': failed, 't': int(time.time())}
 
@@ -1058,7 +1076,7 @@ def proof_job(bid):
         F = (v or {}).get('failed') or []
         if not F or not str(k).isdigit() or int(k) - 1 >= len(pages): continue
         test = json.loads(json.dumps(pages))                            # 先試套一次（不存）：現在套得上去就不算
-        _, fl = apply_proof(test, int(k) - 1, {'fixes': [f for f in F if 'find' in f], 'inserts': [f for f in F if 'after' in f]}, frozen)
+        _, fl = apply_proof(test, int(k) - 1, {'fixes': [f for f in F if 'find' in f], 'inserts': [f for f in F if 'after' in f]}, frozen, _raw_norm(d))
         if fl: hard.add(int(k) - 1)
     hard |= set(bad_pages(pages)) & checked('best')
     top_plan = {j for i in hard for j in range(i - PROOF_TOP_NEAR, i + PROOF_TOP_NEAR + 1) if j in TP}
@@ -1076,7 +1094,7 @@ def proof_job(bid):
             for k, v in rr.items():
                 F = (v or {}).get('failed') or []
                 if not F or not k.isdigit() or int(k) - 1 >= len(pages): continue
-                ap, fl = apply_proof(pages, int(k) - 1, {'fixes': [f for f in F if 'find' in f], 'inserts': [f for f in F if 'after' in f]}, frozen)
+                ap, fl = apply_proof(pages, int(k) - 1, {'fixes': [f for f in F if 'find' in f], 'inserts': [f for f in F if 'after' in f]}, frozen, _raw_norm(d))
                 if ap: v['applied'] = (v.get('applied') or []) + ap; v['failed'] = fl; ch = chp = True
             if ch: write_json(fn, rr)
             fixed += sum(len([a for a in v.get('applied') or [] if not a.get('already')]) for v in rr.values() if isinstance(v, dict))

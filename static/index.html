@@ -716,10 +716,17 @@ let CAPS={}; async function loadCaps(){ try{ CAPS=await api.get('/api/caps'); }c
 let libPollT=null;
 // 首頁會變的東西（書名、作者、封面、分類…）；進度數字不算
 const libSig=L=>JSON.stringify([L.categories,(L.profile||{}).name,L.books.map(b=>[b.id,b.title,b.author,b.category,b.tags,b.cover,b.coverV,b.favorite,b.status,b.lastPage,b.notes,b.marks,(b.parse||{}).status,(b.proof||{}).status,(b.ai||{}).status])]);
-function pollLib(){ clearTimeout(libPollT); if(LIB.books.some(busy)) libPollT=setTimeout(async()=>{ if(!$('vLib').hidden){ try{ await loadCaps(); const before=libSig(LIB); LIB=await api.get('/api/library');
-      if(libSig(LIB)!==before) renderLib(true);                           // 真的有東西變了才重畫
+// 首頁即時更新：有書在解析／校對時每 4 秒拿一次書庫；沒有的話每 3 秒問一次「書庫有沒有變」（別台電腦、背景工作改了什麼），有變才重拿、重畫
+let LIBREV=null;
+function pollLib(){ clearTimeout(libPollT); const anyBusy=LIB.books.some(busy);
+  libPollT=setTimeout(async()=>{ if($('vLib').hidden) return pollLib();
+    try{
+      if(!anyBusy){ const r=(await api.get('/api/rev')).rev; if(LIBREV===null||r===LIBREV){ LIBREV=r; return pollLib(); } LIBREV=r; }
+      await loadCaps(); const before=libSig(LIB); LIB=await api.get('/api/library');
+      if(!anyBusy&&typeof loadMarks==='function') await loadMarks();      // 單字、句子的數字也更新
+      if(libSig(LIB)!==before||!anyBusy) renderLib(true);                 // 真的有東西變了才重畫（書庫的時間戳變了＝一定有東西變了）
       else { LIB.books.forEach(b=>document.querySelectorAll(`[data-st="${b.id}"]`).forEach(el=>{ const h=aiTag(b); if(el.innerHTML!==h) el.innerHTML=h; })); pollLib(); }
-    }catch(e){ pollLib(); } } else pollLib(); },4000); }
+    }catch(e){ pollLib(); } },anyBusy?4000:3000); }
 function prog(b){ return b.pages?Math.min(1,(b.lastPage+1)/b.pages):0; }
 const pct=b=>b.status==='done'?100:Math.round(prog(b)*100);
 // 閱讀進度：斜紋進度條＋百分比（樣式跟開機畫面的 Loading 一樣）

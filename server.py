@@ -470,6 +470,48 @@ def is_text(x): return isinstance(x, str)
 def page_text(pg): return ''.join(x for x in pg if is_text(x))
 
 
+_RAWN = {}
+def _raw_norm(d):
+    """這本書 PDF 原本抽出來的文字（正規化、整本接起來）；拿來確認「重複的一段」原書是不是本來就重複"""
+    f = os.path.join(d, 'pages_raw.json')
+    try: mt = os.path.getmtime(f)
+    except OSError: return None
+    if _RAWN.get(d, (None,))[0] != mt:
+        R = read_json(f, []) or []
+        _RAWN[d] = (mt, re.sub(r'\s+', ' ', ' '.join(' '.join(x for x in pg if isinstance(x, str)) for pg in R if isinstance(pg, list))))
+    return _RAWN[d][1]
+
+
+_DUP_RE = re.compile(r'(.{25,600}?)\1', re.S)
+_DUPW_RE = re.compile(r'\b([a-z]{4,})(\1[a-z]+)\b')
+def drop_dups(pages, d):
+    """拿掉解析、校對時不小心重複的一段（「…very blesse」＋「should … very blessed」、symbios|symbiosis）。
+    原書本來就重複的（表格、喊兩次）不動；畫過螢光筆、寫過筆記的頁不動"""
+    raw = _raw_norm(d)
+    if not raw: return pages
+    frozen = used_pages(read_json(os.path.join(d, 'state.json'), {}))
+    for i, pg in enumerate(pages):
+        if i in frozen or not isinstance(pg, list): continue
+        for j, t in enumerate(pg):
+            if not isinstance(t, str) or len(t) < 30: continue
+            out, pos = [], 0
+            for m in list(_DUP_RE.finditer(t)) + list(_DUPW_RE.finditer(t)):
+                u = m.group(1)
+                if m.re is _DUP_RE and len(u.split()) < 4: continue
+                if m.start() < pos or re.sub(r'\s+', ' ', t[m.start():m.start() + 2 * len(u)]).strip() in raw: continue
+                out.append((m.start(), len(u))); pos = m.start() + 2 * len(u)
+            for s0, L in sorted(out, reverse=True): t = t[:s0] + t[s0 + L:]
+            pg[j] = t
+    return pages
+
+
+def save_pages(d, pages):
+    """存這本書的文字（每次存都順便拿掉不小心重複的段落）"""
+    try: drop_dups(pages, d)
+    except Exception as e: print('drop_dups', e)
+    write_json(os.path.join(d, 'pages.json'), pages)
+
+
 def used_pages(state):
     """畫過螢光筆、寫過段落筆記、翻譯過的頁：段落不能再動，不然標記的位置會跑掉"""
     state = state or {}
@@ -717,7 +759,7 @@ def quality_job(bid):
         with LOCK:
             cur = read_json(os.path.join(d, 'pages.json')) or []
             if i < len(cur) and i not in used_pages(read_json(os.path.join(d, 'state.json'), {})):
-                cur[i] = new; write_json(os.path.join(d, 'pages.json'), cur); pages = cur
+                cur[i] = new; save_pages(d, cur); pages = cur
         update_book(bid, fix={'status': 'running', 'done': k + 1, 'total': len(todo), 'rev': int(time.time() * 1000)})
     else:
         update_book(bid, fix={'status': 'done', 'done': len(todo), 'total': len(todo)})
@@ -762,7 +804,7 @@ def read_page_ai(bid, pno, imgdir, kind='fast'):
         frozen = used_pages(read_json(os.path.join(d, 'state.json'), {}))
         if pno < len(pages) and pno not in frozen and not any(is_text(x) for x in pages[pno]) and paras:
             pages[pno] = paras + [x for x in pages[pno] if not is_text(x)]      # 圖表留著，放在文字後面
-            write_json(os.path.join(d, 'pages.json'), pages)
+            save_pages(d, pages)
     return {'ok': True, 'read': len(paras), 't': int(time.time())}
 
 
@@ -879,7 +921,7 @@ def proof_page(bid, pno, imgdir, kind='best'):
         pages = read_json(os.path.join(d, 'pages.json')) or []
         frozen = used_pages(read_json(os.path.join(d, 'state.json'), {}))
         applied, failed = apply_proof(pages, pno, j, frozen)
-        if applied: write_json(os.path.join(d, 'pages.json'), pages)
+        if applied: save_pages(d, pages)
     return {'ok': bool(j.get('ok')) and not failed, 'applied': applied, 'failed': failed, 't': int(time.time())}
 
 
@@ -1038,7 +1080,7 @@ def proof_job(bid):
                 if ap: v['applied'] = (v.get('applied') or []) + ap; v['failed'] = fl; ch = chp = True
             if ch: write_json(fn, rr)
             fixed += sum(len([a for a in v.get('applied') or [] if not a.get('already')]) for v in rr.values() if isinstance(v, dict))
-        if chp: write_json(os.path.join(d, 'pages.json'), pages)
+        if chp: save_pages(d, pages)
     with LOCK:
         pages = read_json(os.path.join(d, 'pages.json')) or []
     update_book(bid, proof={'status': 'done', 'done': total, 'total': total, 'fixed': fixed, 'rev': int(time.time() * 1000)}, ocrBad=bad_pages(pages))
@@ -1557,6 +1599,12 @@ class H(BaseHTTPRequestHandler):
             return self.err(500, str(e))
 
     def api(self, m, p, qs):
+        if p == ['rev'] and m == 'GET':                 # 書庫有沒有變（書、單字、句子、筆記）：首頁每幾秒問一次，有變才重畫
+            r = 0
+            for fn in ('_index.json', '_單字收藏.json', '_句子收藏.json'):
+                try: r = max(r, os.path.getmtime(os.path.join(LIB, fn)))
+                except OSError: pass
+            return self.send(200, {'rev': r})
         if p == ['library'] and m == 'GET':
             with LOCK: return self.send(200, lib_view(load_index()))
         # ---------- 字典、單字收藏、句子收藏 ----------
@@ -1729,7 +1777,7 @@ class H(BaseHTTPRequestHandler):
                 pages = [[str(x) for x in pg] if isinstance(pg, list) else [] for pg in pages]
                 write_json(os.path.join(d, 'pages_raw.json'), pages)
                 pages = clean_pages(pages)
-                write_json(os.path.join(d, 'pages.json'), pages)
+                save_pages(d, pages)
                 b = update_book(bid, pages=len(pages), hasText=sum(len(page_text(pg)) for pg in pages) > 40, importing=0)
                 return self.send(200, b)
             if sub == 'parse' and m == 'POST':       # 用 Docling 解析（匯入後自動叫；「詳細資料」可以重新解析）
@@ -1757,7 +1805,7 @@ class H(BaseHTTPRequestHandler):
                 with LOCK:
                     pages = read_json(os.path.join(d, 'pages.json')) or []
                     if pno in used_pages(read_json(os.path.join(d, 'state.json'), {})): return self.err(409, '這一頁剛剛加了標記，沒有套用')
-                    pages[pno] = new; write_json(os.path.join(d, 'pages.json'), pages)
+                    pages[pno] = new; save_pages(d, pages)
                     bb = [i for i in (b.get('ocrBad') or []) if i != pno or garble(new)[0] > QUALITY_THR]
                     update_book(bid, ocrBad=bb)
                 return self.send(200, {'page': new, 'ocrBad': bb})

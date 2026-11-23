@@ -554,6 +554,10 @@ table.list .rprog{width:100%;min-width:110px}
 .para.li+.para:not(.li){margin-top:.5em}
 /* ---------- 雙頁閱讀、沒有右邊的筆記欄 ---------- */
 .sheet .r2{grid-template-columns:minmax(0,1fr)!important}
+/* 閱讀頁的段落用一般區塊（不是 grid）：Safari／App 的分欄遇到 grid 會把一行字從中間切成兩半，分在兩欄 */
+.sheet .r2{display:block}
+.spread.two{orphans:2;widows:2}
+.para.tl{margin:.1em 0;font-size:1em;font-weight:500}
 .sheet .r2>.R,.sheet .gut,#pgNote{display:none!important}
 .sheet .r2>.L{padding-right:0!important}
 .spread.two{column-count:2;column-gap:64px;column-fill:auto;column-rule:1px solid var(--pline,var(--line));overflow:hidden;position:relative}
@@ -1242,11 +1246,14 @@ function pageRows(){      // 這一頁（PG）的段落、圖表
   const subHead=(t,i)=>isTxt(t)&&isTxt(P[i+1])&&t.trim().length<=60&&t.trim().split(/\s+/).length<=9&&/^[A-Z0-9"“]/.test(t.trim())&&!/[.!?;:,"”’)]$/.test(t.trim());   // 小標題：很短、沒有句尾標點、後面接一段
   const kind=P.map((t,i)=>{ if(!isTxt(t)) return ''; if(isHead(t)||subHead(t,i)) return 'hd'; const pv=P[i-1];
     if(i===0) return 'noind'; if(!isTxt(pv)) return 'noind'; if(isHead(pv)||subHead(pv,i-1)) return (isHead(pv)&&t.length>180&&/^[A-Z]/.test(t)?'cap ':'')+'noind'; return ''; });
+  // 目錄頁：一整串短短的標題（章名一行一個）→ 當成清單，用一般字的大小，不要每一行都是大標題
+  { const H=kind.map((k,i)=>k.includes('hd')&&P[i].trim().length<=70?i:-1).filter(i=>i>=0);
+    if(H.length>=6) H.slice(1).forEach(i=>{ if(!/^(contents|table of contents|目錄)$/i.test(P[i].trim())) kind[i]='tl noind'; }); }
   const DIV=isDivider(P);
   if(!P.length) return BOOK.meta.hasText
     ? `<div class="r2 rc blankpg" data-i="0"><div class="L"><button type="button" class="linkbtn" data-mode-go="pdf" title="這一頁沒有文字（原書的空白頁或整頁圖）">看原始頁面</button></div></div>`      // 原書的空白頁：就是空白的一頁
     : `<div class="r2 rc" data-i="0"><div class="L"><div class="notext">這本 PDF 是掃描圖片，抽不出文字。<br><button type="button" class="small" style="margin-top:10px" data-mode-go="pdf">看原始頁面</button></div></div></div>`;
-  return P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${/^• /.test(t)?' li':''}${DIV?(isLabel(t)?' dvl':i===P.findIndex(x=>isTxt(x)&&!isLabel(x))?' dvt':' dvs'):''}${DIV&&i===0?' dv1':''}${!DIV&&isLabel(t)?' lbl':''}${kind[i].includes('hd')?' hd':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${PG}_${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div></div>`).join(''); }
+  return P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${/^• /.test(t)?' li':''}${DIV?(isLabel(t)?' dvl':i===P.findIndex(x=>isTxt(x)&&!isLabel(x))?' dvt':' dvs'):''}${DIV&&i===0?' dv1':''}${!DIV&&isLabel(t)?' lbl':''}${kind[i].includes('hd')?' hd':''}${kind[i].includes('tl')?' tl':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${PG}_${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div></div>`).join(''); }
 function renderPage(){
   const sh=$('sheet'), n=nPages(); TWO=twoOK(); PG=nearVis(PG,1);
   const V=visPages(), pos=Math.max(0,V.indexOf(PG)), bp=TWO?pos-(pos%2):pos; BASE=V[bp]; PG=BASE;
@@ -1290,9 +1297,7 @@ function paginateTwo(sh,avail){
   const cols=()=>Math.max(1,Math.round((sp.scrollWidth+gap)/(colW()+gap)));
   // 先試著把兩頁都放進一個畫面（字最多縮到你設定的 80%）；還是放不下就照你的字級，多分幾個畫面
   sh.style.removeProperty('--fs');
-  const want=sides.length;                                   // 兩頁 = 兩欄剛好一個畫面
-  if(cols()>want){ let ok=false; for(const k of [0.95,0.9,0.85,0.8,0.75,0.7]){ if(FS*k<12) break; sh.style.setProperty('--fs',(FS*k)+'px'); if(cols()<=want){ ok=true; break; } }
-    if(!ok) sh.style.removeProperty('--fs'); }
+  // 字的大小永遠照你設定的（不會每頁縮放、大小不一）：放不下的接到下一個畫面
   SUBN=Math.max(1,Math.ceil(cols()/2)); SUB=SUB_END?SUBN-1:Math.min(SUB,SUBN-1); SUB_END=false;
   showTwo(); }
 function showTwo(){
@@ -1332,10 +1337,8 @@ function paginate(keep){
       if(onlyFig) f.style.marginTop=Math.max(10,(avail-(tw*ih/iw)-ch)/2)+'px'; }
     else { const H=r.offsetHeight; if(H>avail) f.style.zoom=Math.max(0.3,(avail-8)/H); } });
   // 一個畫面 = 原書的一頁：放不下就先把字稍微縮小（最多縮到 86%），還是放不下才分成好幾個畫面
-  const fit=()=>rows.reduce((a,r)=>a+r.offsetHeight,0)<=avail;
   sh.style.removeProperty('--fs');
-  if(!fit()){ for(const k of [0.96,0.92,0.89,0.86]){ sh.style.setProperty('--fs',(FS*k)+'px'); if(fit()) break; }
-    if(!fit()) sh.style.removeProperty('--fs'); }
+  // 字的大小永遠照你設定的（不會每頁縮放）：放不下的段落接到下一個畫面
   const U=[]; rows.forEach(r=>{ const H=r.offsetHeight; if(H<=avail||r.querySelector(':scope>.L>.fig')){ U.push({r,off:0,h:Math.min(H,avail)}); return; }
     // 太長的段落：在「真正的行與行之間」切開。每一行的高度不一定一樣（註腳上標、收藏記號會把那一行撐高），所以量每一行實際的位置
     const ends=lineEnds(r), room=avail-8; let st=0;

@@ -1465,6 +1465,7 @@ def ai_job(bid):
         if 'category' not in ed and m.get('category') in ix['categories']: b['category'] = m['category']
         if 'tags' not in ed and isinstance(m.get('tags'), list): b['tags'] = [str(t).strip()[:40] for t in m['tags'][:3] if str(t).strip()]
         cp = m.get('coverPage'); cover_job = isinstance(cp, int) and 1 <= cp <= min(5, len(pages)) and not b.get('coverUser')
+        if cover_job and len(page_text(pages[cp - 1])) >= 300: cover_job = False         # 整頁都是字（目錄、版權頁）不是封面：用設計好的封面
         b['ai'] = {'status': 'done'}; save_index(ix)
     if cover_job:
         DOCLING_READY.wait(900)

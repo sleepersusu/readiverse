@@ -557,6 +557,7 @@ def clean_pages(pages, frozen=()):
         if not a or not b or a[-1] != len(pages[p]) - 1 or b[0] != 0: continue     # 中間隔著圖表：不接
         last, first = pages[p][a[-1]].strip(), pages[p + 1][b[0]].strip()
         if re.search(r'[.!?:;"”’)\]—–]$', last): continue
+        if len(last.split()) < 8 and not re.match(r'[a-z(]', first): continue      # 上一頁最後是目錄、標題這種短行：不接
         if re.search(r'[A-Za-z]-$', last) and re.match(r'[a-z]', first):          # ex- / pected
             pages[p][a[-1]] = last[:-1] + first
         elif re.match(r'[a-z(]', first) or (len(last) > 60 and re.search(r'[a-z,]$', last)):
@@ -1250,7 +1251,7 @@ def parse_job(bid):
                         new = [re.sub(r'\s{2,}', ' ', re.sub(r'\s*(?:<\s*[A-Za-z][^<>]{0,40}>|[\w%]*="[^"<>]{0,15}">)\s*', ' ', x)).strip() if is_text(x) else x for x in new]
                         new = [x for x in new if not is_text(x) or x]
                         if i < len(raw): new = fix_dashes(new, ' '.join(x for x in raw[i] if is_text(x)))
-                        if i < len(raw) and not scanned:                        # Docling 漏掉的段落：用 PDF 本身的文字補回來
+                        if i < len(raw) and not scanned and not j.get('lineMode'):   # Docling 漏掉的段落：用 PDF 本身的文字補回來（照行的位置排的不需要）
                             nb = [x for q in (i - 1, i + 1) if 0 <= q < len(pages) for x in (j['pages'].get(str(q + 1)) or pages[q])]
                             if raw_rep is None: raw_rep = raw_repeats(raw)
                             new, nadd = restore_missing(new, raw[i], nb, raw_rep)
@@ -1258,7 +1259,7 @@ def parse_job(bid):
                         if page_text(new).strip() or any(not is_text(x) for x in new) or not page_text(pages[i]).strip():
                             pages[i] = new
                     pages = clean_pages(pages, frozen)
-                    if not scanned and raw:                         # 數位書：照原書的分段切開黏在一起的段落、補回漏掉的小標題
+                    if not scanned and raw and not j.get('lineMode'):   # 數位書（舊做法）：照原書的分段切開黏在一起的段落、補回漏掉的小標題
                         if raw_rep6 is None: raw_rep6 = raw_repeats(raw, 6)
                         for k in sorted(int(x) - 1 for x in j['pages']):
                             if k in frozen or not (0 <= k < len(pages)): continue
@@ -1281,7 +1282,9 @@ def parse_job(bid):
         write_json(os.path.join(d, 'lost.json'), lost)
         b = update_book(bid, parse={'status': 'done', 'next': total, 'total': total, 'rev': int(time.time() * 1000)},
                         hasText=sum(len(page_text(pg)) for pg in pages) > 40)
-    if b and claude_path() and (read_json(CONFIG, {}) or {}).get('proof', True):
+    if b and b.get('noProofOnce'):                                     # 這次重新解析只改排版：不重新校對（不花額度）
+        update_book(bid, noProofOnce=False)
+    elif b and claude_path() and (read_json(CONFIG, {}) or {}).get('proof', True):
         with LOCK:                                                      # 重新解析過：整本重新校對（兩輪都重來）
             for fn in list(PROOF_FILES.values()) + ['read_ai.json']: write_json(os.path.join(d, fn), {})
         update_book(bid, proof={'status': 'queued', 'done': 0, 'total': total})  # 記下來：App 關掉再開也會接著校對

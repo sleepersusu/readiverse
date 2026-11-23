@@ -7,7 +7,7 @@
 段落是字串；圖片是 {"t":"fig","src":"p12_0.png","cap":"Figure 6.2 …"}；
 表格是 {"t":"table","src":"p90_t0.png","rows":[[格, 格…], …],"cap":"Table 6.1 …"}
 """
-import json, re, os, sys
+import json, re, os, sys, statistics
 
 def is_scanned(pd):
     """抽樣幾頁：整頁幾乎都是一張圖 → 掃描書"""
@@ -110,6 +110,99 @@ def _lost_words(lines, paras):
     return sorted(w for w, n in need.items() if have.get(w, 0) + sum(1 for h in have if w in h and len(w) > 3) < 1)
 
 
+
+# ---------- 數位書：照「每一行在頁面上的位置」分段（縮排、空行、置中＝標題），順序和原書一樣 ----------
+# 數位書：用每個字在頁面上的位置組成「行」，再照縮排、空行、置中判斷分段和標題（跟掃描書用 Apple Vision 的做法一樣）
+
+def page_lines(pg):
+    tp = pg.get_textpage(); W, H = pg.get_size(); n = tp.count_chars()
+    text = tp.get_text_range(0, n) if n else ''
+    lines = []; cur = None
+    for i in range(n):
+        ch = text[i] if i < len(text) else ''
+        if ch in '\r\n':
+            if cur: lines.append(cur); cur = None
+            continue
+        try: l, b, r, t = tp.get_charbox(i)
+        except Exception: continue
+        if r - l <= 0 and ch != ' ':
+            continue
+        y = H - (b + t) / 2
+        alnum = ch.isalnum()
+        if cur and not cur.get('a') and alnum and abs(l - cur['x1']) < 15:     # 這一行到目前只有標點（開頭的引號）：用字母的高度
+            cur['y'] = y; cur['a'] = True
+        elif cur and (abs(y - cur['y']) > max(3, (cur['h'] or 8) * 0.6) or l < cur['x1'] - 40) and (alnum or l < cur['x1'] - 40):
+            lines.append(cur); cur = None
+        if cur is None: cur = {'y': y, 'x0': l, 'x1': r, 'h': t - b, 's': '', 'a': alnum}
+        cur['s'] += ch; cur['x0'] = min(cur['x0'], l) if ch.strip() else cur['x0']; cur['x1'] = max(cur['x1'], r); cur['h'] = max(cur['h'], t - b)
+    if cur: lines.append(cur)
+    out = []
+    for L in lines:
+        s = re.sub(r'\s+', ' ', L['s'].replace('\ufffe', '-').replace('\u00ad', '-').replace('\u0002', '-')).strip()
+        if s: L['s'] = s; out.append(L)
+    out.sort(key=lambda L: (round(L['y'] / 3), L['x0']))
+    merged = []
+    for L in out:                                         # 同一個高度、左右接著的片段：同一行
+        M = merged[-1] if merged else None
+        if M and abs(L['y'] - M['y']) < max(2.5, 0.35 * (M['h'] or 8)) and L['x0'] >= M['x1'] - 2:
+            M['s'] = M['s'] + ('' if M['s'].endswith('-') else ' ') + L['s']; M['x1'] = max(M['x1'], L['x1']); M['h'] = max(M['h'], L['h'])
+        else: merged.append(dict(L))
+    return merged, W, H
+
+def paras_from_lines(lines, W, H):
+    body = [L for L in lines if len(L['s']) > 25]
+    if not body: return [(L['s'], 'h' if len(L['s']) < 60 else 'p', L['y']) for L in lines]
+    left = statistics.median(sorted(L['x0'] for L in body)[:max(1, len(body) // 2)])
+    right = statistics.median(sorted((L['x1'] for L in body), reverse=True)[:max(1, len(body) // 2)])
+    gaps = [b['y'] - a['y'] for a, b in zip(lines, lines[1:]) if 4 <= b['y'] - a['y'] < 40]       # 行距（同一行的片段不算）
+    lg = statistics.median(gaps) if gaps else 14
+    out = []; cur = None; kind = 'p'; prev = None; y0 = 0
+    for L in lines:
+        s = L['s']; ind = L['x0'] - left; rgap = right - L['x1']
+        centered = ind > 20 and abs(ind - rgap) < 25 and len(s) < 80
+        big = L['h'] > 1.45 * statistics.median([x['h'] for x in body]) and (L['x1'] - L['x0']) < 0.75 * (right - left)   # 字明顯比較大、而且是短短一行才算標題（括號會把一行撐高一點）
+        is_head = (centered or big) and not re.search(r'[.,;:]$', s) and len(s.split()) <= 12
+        gap = (L['y'] - prev['y']) if prev else 0
+        indent_new = ind > 6 and (prev is None or abs(L['x0'] - prev['x0']) > 3)      # 首行縮排；條列換行後縮排的位置一樣 = 同一段
+        if re.match(r'^(\d{1,3}\.\s|Part [IVXL]+\b|Chapter\b|Appendix\b|Acknowledg|Notes$|Index$|Conclusions?$)', s): indent_new = True   # 目錄的每一項
+        if prev and re.match(r'^[•●▪◦]', prev['s']) and prev['x0'] + 2 < L['x0'] < prev['x0'] + 30 and not re.match(r'^[•●▪◦]', s): indent_new = False; hang = True   # 條列換行（懸掛縮排）：同一項
+        else: hang = False
+        if re.match(r'^[•●▪◦]\s', s): indent_new = True                                                              # 「•」開頭：新的一項
+        new = (prev is None or is_head or kind == 'h' or indent_new or (gap > lg * 1.6 and not hang)
+               or (prev and right - prev['x1'] > 40 and re.search(r'[.!?:"”’)]$', prev['s']))   # 上一行沒寫滿、句子也結束了：上一段結束
+               or (prev and not hang and (prev['x1'] - prev['x0']) < 0.6 * (right - left)))               # 上一行特別短（目錄、短條列）
+        if new:
+            if cur: out.append((cur, kind, y0))
+            cur = s; kind = 'h' if is_head else 'p'; y0 = L['y']
+        else:
+            cur = (cur[:-1] + s) if (cur.endswith('-') and s[:1].islower()) else cur + ' ' + s
+        prev = L
+    if cur: out.append((cur, kind, y0))
+    return out
+
+
+def line_page(pg, figs, skip_txt=(), list_items=()):
+    """這一頁的內容：文字照行的位置分段；圖和表格（Docling 抓的）照它們的高度插回去；圖裡面的字不算內文"""
+    lines, W, H = page_lines(pg)
+    def inside(L):
+        for (t, b, l, r, _) in figs:
+            if t - 2 <= L['y'] <= b + 2 and L['x0'] >= l - 6 and L['x1'] <= r + 6: return True
+        return False
+    lines = [L for L in lines if not inside(L)]
+    # 頁碼（只有數字）不要
+    lines = [L for L in lines if not re.fullmatch(r'[\divxlcdm]{1,6}', L['s'].lower())]
+    paras = paras_from_lines(lines, W, H) if lines else []
+    caps = {re.sub(r'\s+', ' ', c).strip().lower() for c in skip_txt if c}
+    items = []
+    lkeys = [re.sub(r'\s+', ' ', x).strip()[:30] for x in list_items if len(x.strip()) >= 6]
+    for t, k, y in paras:
+        if t.strip().lower() in caps: continue                     # 圖說已經放進圖片裡了
+        if any(t.startswith(kk) for kk in lkeys) and not re.match(r'^([•●▪◦\-–—*]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s', t): t = '• ' + t   # 條列：原書的「•」是畫上去的
+        items.append((y, t))
+    for (ft, fb, fl, fr, blk) in figs: items.append((ft - 0.5, blk))
+    items.sort(key=lambda x: x[0])
+    return [x for _, x in items]
+
 def main():
     pdf, figdir = sys.argv[1], sys.argv[2]
     chunk = int(sys.argv[3]) if len(sys.argv) > 3 else 20
@@ -118,6 +211,7 @@ def main():
     import pypdfium2
     pd = pypdfium2.PdfDocument(pdf)
     total = len(pd)
+    if len(sys.argv) > 5: total = min(total, int(sys.argv[5]))        # 測試用：只做到第幾頁
     scanned = is_scanned(pd)
     use_vision = scanned and sys.platform == 'darwin' and has_ocrmac()
     print(json.dumps({'total': total, 'scanned': scanned, 'ocr': 'apple-vision' if use_vision else ''}), flush=True)
@@ -162,6 +256,57 @@ def main():
             if isinstance(it, (PictureItem, TableItem)):
                 c = it.caption_text(doc)
                 if c: caps.add(c.strip())
+        if not use_vision and os.environ.get('RV_DOCLING_TEXT') != '1':        # 數位書：文字照行的位置排，Docling 只負責圖表
+            figs, capt, lists, k = {}, {}, {}, 0
+            dseq = {}                                   # Docling 自己的排法（文字＋圖表，照它的順序），等一下每頁比較用
+            for it, _ in doc.iterate_items():
+                if not getattr(it, 'prov', None): continue
+                lab = getattr(getattr(it, 'label', None), 'value', '')
+                if lab == 'list_item': lists.setdefault(it.prov[0].page_no, []).append(it.text or '')
+                if isinstance(it, TextItem) and not isinstance(it, (PictureItem, TableItem)) and lab not in SKIP:
+                    t = (it.text or '').strip()
+                    if t and lab != 'caption':
+                        if lab == 'list_item' and not re.match(r'^([•●▪◦\-–—*]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s', t): t = '• ' + t
+                        dseq.setdefault(it.prov[0].page_no, []).append(t)
+                if not isinstance(it, (PictureItem, TableItem)): continue
+                pno = it.prov[0].page_no
+                img = it.get_image(doc)
+                if img is None or min(img.size) < 40: continue
+                kind = 'table' if isinstance(it, TableItem) else 'fig'
+                name = 'p%s_%s%d.png' % (pno, 't' if kind == 'table' else '', k); k += 1
+                img.save(os.path.join(figdir, name))
+                cap = (it.caption_text(doc) or '').strip()
+                blk = {'t': kind, 'src': name, 'w': img.size[0], 'h': img.size[1], 'cap': cap}
+                if kind == 'table':
+                    rows = [[(c.text or '').strip() for c in row] for row in it.data.grid]
+                    if rows and any(any(x for x in r) for r in rows): blk['rows'] = rows
+                try:
+                    ph = doc.pages[pno].size.height
+                    bb = it.prov[0].bbox.to_top_left_origin(ph)
+                    figs.setdefault(pno, []).append((bb.t, bb.b, bb.l, bb.r, blk))
+                except Exception:
+                    figs.setdefault(pno, []).append((0, 0, 0, 0, blk))
+                if cap: capt.setdefault(pno, []).append(cap)
+                dseq.setdefault(pno, []).append(blk)
+            pages = {}
+            for n in range(a, b + 1):
+                try:
+                    lp_items = line_page(pd[n - 1], figs.get(n, []), capt.get(n, []), lists.get(n, []))
+                    dl_items = dseq.get(n, [])
+                    # 每一頁選比較準的排法：拿 PDF 本身的文字順序當標準，看「照行的位置排」和「Docling 排」哪個跟它比較一致
+                    import difflib
+                    W = lambda xs: re.findall(r'[a-z0-9]+', ' '.join(x for x in xs if isinstance(x, str)).lower())
+                    ref = re.findall(r'[a-z0-9]+', pd[n - 1].get_textpage().get_text_range().lower())
+                    def sc(xs):
+                        w = W(xs)
+                        if not ref or not w: return 0
+                        sm = difflib.SequenceMatcher(None, ref, w, autojunk=False)
+                        return sum(m.size for m in sm.get_matching_blocks()) / max(len(ref), len(w))
+                    a_, b_ = sc(lp_items), sc(dl_items)
+                    pages[str(n)] = dl_items if (dl_items and b_ > a_ + 0.03) else lp_items
+                except Exception as e: print(json.dumps({'warn': 'page %d: %s' % (n, e)}), flush=True)
+            print(json.dumps({'from': a, 'to': b, 'pages': pages, 'lineMode': True}, ensure_ascii=False), flush=True)
+            continue
         pages, k = {}, 0
         for it, _ in doc.iterate_items():
             if not getattr(it, 'prov', None): continue

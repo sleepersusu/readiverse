@@ -1208,9 +1208,20 @@ PARSEQ = queue.Queue()
 PARSE_PROC = {}
 
 
+PARSE_PENDING = set()       # 已經在排隊的書（同一本不要排兩次：跑兩次會把「這次不要校對」用掉）
+
+
+def parse_put(bid):
+    with LOCK:
+        if bid in PARSE_PENDING: return False
+        PARSE_PENDING.add(bid)
+    PARSEQ.put(bid); return True
+
+
 def parse_worker():
     while True:
         bid = PARSEQ.get()
+        with LOCK: PARSE_PENDING.discard(bid)
         wait_session()
         DOCLING_READY.wait()
         try: parse_job(bid)
@@ -1312,7 +1323,7 @@ def start_parse(bid, restart=False):
         queue_proof(bid); return find_book(load_index(), bid) or b                  # 解析不了：AI 直接看頁面圖
     nxt = 0 if restart else int((b.get('parse') or {}).get('next') or 0)
     b = update_book(bid, parse={'status': 'queued', 'next': nxt, 'total': b.get('pages') or 0})
-    PARSEQ.put(bid); return b
+    parse_put(bid); return b
 
 
 # ---------- AI：只在匯入時判斷一次書名、作者、分類、標籤、哪一頁是封面（使用者改過的欄位不蓋掉）----------
@@ -1964,7 +1975,7 @@ def main():
     with LOCK:                                   # 上次沒做完的：接著做
         for b in load_index()['books']:
             if (b.get('ai') or {}).get('status') in ('running', 'queued'): AIQ.put(b['id'])
-            if (b.get('parse') or {}).get('status') in ('running', 'queued'): PARSEQ.put(b['id'])
+            if (b.get('parse') or {}).get('status') in ('running', 'queued'): parse_put(b['id'])
             elif (b.get('proof') or {}).get('status') in ('running', 'queued'): PROOFQ.put(b['id'])
     srv = ThreadingHTTPServer(('127.0.0.1', PORT), H)
     url = 'http://localhost:%d' % PORT

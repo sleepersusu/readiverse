@@ -535,6 +535,24 @@ table.list .rprog{width:100%;min-width:110px}
 @media (prefers-reduced-motion:reduce){.bootload .dots::after{animation:none;content:"..."}}
 .para.li .ptx{text-indent:-1.1em!important;padding-left:2.4em;margin:.15em 0}
 .para.li+.para:not(.li){margin-top:.5em}
+/* ---------- 雙頁閱讀、沒有右邊的筆記欄 ---------- */
+.sheet .r2{grid-template-columns:minmax(0,1fr)!important}
+.sheet .r2>.R,.sheet .gut,#pgNote{display:none!important}
+.sheet .r2>.L{padding-right:0!important}
+.spread.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:64px;position:relative}
+.spread.two::before{content:"";position:absolute;top:0;bottom:0;left:50%;width:1px;background:var(--pline,var(--line))}
+.spread.two .side{min-width:0;position:relative}
+.spread.two .para{max-width:none}
+.sheet.two>.rhead,.sheet.two>.rf{display:none}
+.sheet.two .ptx{line-height:1.55}
+.sheet.two .para{margin-bottom:.15em}
+.sheet.two{padding-top:14px}
+.side.over{overflow-y:auto}
+.sfolio{text-align:center;font-family:var(--f-read);font-size:12px;color:var(--pmuted);margin-top:6px}
+mark.hl.c0{background:none;padding:0}
+mark.hl.noted{text-decoration:underline dashed;text-decoration-color:color-mix(in srgb,var(--ink) 55%,transparent);text-underline-offset:4px;text-decoration-thickness:1.5px}
+.notebox{position:fixed;z-index:60;width:min(370px,calc(100vw - 16px));display:flex;flex-direction:column;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.18);padding:10px 12px 12px}
+.notebox textarea{width:100%;resize:vertical;font-size:14px}
 </style></head>
 <body>
 <div id="boot" class="boot" role="status" aria-live="polite"><div class="bootin"><div class="bootlogo"><span class="d"></span>Readiverse</div>
@@ -571,6 +589,7 @@ table.list .rprog{width:100%;min-width:110px}
     <span id="rAi"></span>
     <span class="grow"></span>
     <button type="button" class="ib" id="zhBtn" title="中文對照：在每段英文底下顯示 AI 翻譯" aria-label="中文對照" aria-pressed="false"><svg class="i" viewBox="0 0 24 24"><path d="M4 5h8M8 3v2M5.5 5c.5 3 2.5 5.5 5.5 6.5M10.5 5c-.6 3.2-2.8 5.7-6 7"/><path d="M13 21l4-9 4 9M14.4 18h5.2"/></svg></button>
+    <button type="button" class="ib" id="spreadBtn" title="雙頁／單頁" aria-label="雙頁或單頁閱讀"><svg class="i" viewBox="0 0 24 24"><path d="M3 5.5C5.5 4.5 9 4.5 12 6v13c-3-1.5-6.5-1.5-9-.5zM21 5.5c-2.5-1-6-1-9 .5v13c3-1.5 6.5-1.5 9-.5z"/></svg></button>
     <button type="button" class="ib aipgbtn" id="aiPgBtn" title="用 AI 整理這一頁（重新分段、修正 OCR 錯字）" aria-label="用 AI 整理這一頁"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 15l.6 1.4L7 17l-1.4.6L5 19l-.6-1.4L3 17l1.4-.6z"/></svg></button>
     <div class="seg" role="group" aria-label="左邊顯示">
       <button type="button" class="ib" data-mode="text" title="文字模式：可以畫螢光筆、寫筆記" aria-label="文字模式"><svg class="i" viewBox="0 0 24 24"><path d="M5 6h14M5 10h14M5 14h14M5 18h9"/></svg></button><button type="button" class="ib" data-mode="pdf" title="原始 PDF 頁面" aria-label="原始 PDF 頁面"><svg class="i" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><rect x="8" y="11" width="8" height="6" rx="1"/></svg></button>
@@ -1052,6 +1071,9 @@ function showPage(p,dir){
   if(ZH&&MODE==='text'&&BOOK.meta.hasText) ensureZh(PG).then(()=>ensureZh(PG+1)).catch(()=>{});
 }
 $('prev').onclick=()=>turn(-1); $('next').onclick=()=>turn(1);
+$('spreadBtn').onclick=()=>{ LS.set('spread',!LS.get('spread',true)); if(BOOK&&MODE==='text') renderPage(); spreadBtnState(); };
+function spreadBtnState(){ const b=$('spreadBtn'); if(!b) return; const on=LS.get('spread',true); b.classList.toggle('on',on); b.setAttribute('aria-pressed',String(on)); b.title=on?'現在是雙頁（視窗夠寬時）：按一下改成單頁':'現在是單頁：按一下改成雙頁'; }
+spreadBtnState();
 $('pgIn').onchange=()=>showPage(($('pgIn').value|0)-1);
 document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{ MODE=b.dataset.mode; LS.set('mode',MODE); showPage(PG); });
 $('aiPgBtn').onclick=()=>{ if(BOOK) aiPage(PG); };
@@ -1113,7 +1135,7 @@ function renderPara(t,M){
   for(let j=0;j<B.length-1;j++){ const a=B[j], b=B[j+1]; if(b<=a) continue;
     let x=esc(t.slice(a,b)); const u=U.find(u=>u[0]<=a&&u[1]>=b), r=H.find(r=>r[0]<=a&&r[1]>=b);
     if(u) x=`<span class="${u[2]}${u[1]===b?' last':''}" data-${u[2]}="${u[3]}">${x}</span>`;
-    if(r) x=`<mark class="hl c${r[2]}" data-s="${r[0]}"${r[3]?` data-nid="${r[3]}"`:''}>${x}</mark>`;
+    if(r) x=`<mark class="hl c${r[2]}${r[3]&&ST.notes[r[3]]?' noted':''}" data-s="${r[0]}"${r[3]?` data-nid="${r[3]}"`:''}${r[3]&&ST.notes[r[3]]?` title="${esc(String(ST.notes[r[3]].text||'').slice(0,120))}"`:''}>${x}</mark>`;
     h+=x; }
   return h; }
 function zhHtml(i){ if(!ZH) return ''; const Z=ST.zh[PG];
@@ -1143,22 +1165,28 @@ const LABEL_RE=new RegExp(`^(part|chapter|section|volume|book|unit|lesson|act|ap
 const isLabel=t=>typeof t==='string'&&LABEL_RE.test(t.trim());
 // 整頁只有一兩行標題（像 Part 1 的扉頁）：當成「章節頁」，置中放大
 const isDivider=P=>{ const T=P.filter(isTxt); return T.length>0&&T.length<=3&&P.length===T.length&&T.every(t=>isLabel(t)||isHead(t))&&T.join(' ').length<=90; };
-function renderPage(){
-  const P=paras(PG), sh=$('sheet'), n=nPages(); let tn=0;
+// ---------- 雙頁閱讀：左邊第 N 頁、右邊第 N+1 頁（像打開的書）；視窗窄的時候一次一頁 ----------
+let BASE=0, TWO=false;
+const twoOK=()=>LS.get('spread',true)&&innerWidth>=1100&&innerWidth/Math.max(1,innerHeight)>=1.2;
+function withPg(p,fn){ const o=PG; PG=p; try{ return fn(); } finally{ PG=o; } }
+function pgOf(el){ const s=el&&el.closest&&el.closest('[data-side]'); return s?+s.dataset.side:PG; }
+function pageRows(){      // 這一頁（PG）的段落、圖表
+  const P=paras(PG);
   const subHead=(t,i)=>isTxt(t)&&isTxt(P[i+1])&&t.trim().length<=60&&t.trim().split(/\s+/).length<=9&&/^[A-Z0-9"“]/.test(t.trim())&&!/[.!?;:,"”’)]$/.test(t.trim());   // 小標題：很短、沒有句尾標點、後面接一段
   const kind=P.map((t,i)=>{ if(!isTxt(t)) return ''; if(isHead(t)||subHead(t,i)) return 'hd'; const pv=P[i-1];
     if(i===0) return 'noind'; if(!isTxt(pv)) return 'noind'; if(isHead(pv)||subHead(pv,i-1)) return (isHead(pv)&&t.length>180&&/^[A-Z]/.test(t)?'cap ':'')+'noind'; return ''; });
-  const used=pageUsed(PG), aiBusy=AIPG[PG], DIV=isDivider(P);
-  const cards=cardsOfPage(PG).filter(o=>o.nid&&ST.notes[o.nid]), byPara={}; cards.forEach(o=>(byPara[o.i]=byPara[o.i]||[]).push(o));
-  const pn=ST.pageNotes[PG];
-  let h=`<div class="gut" role="separator" aria-orientation="vertical" aria-label="拖曳調整左右寬度" tabindex="0"></div>
-    <div class="r2 rhead"><div class="L"><div class="ptop"><span class="runhead" title="${esc(BOOK.meta.title)}">${esc(String(BOOK.meta.title).split(/[:：]/)[0])}</span>${AIPG_ERR[PG]?`<span class="err" style="margin-left:8px">${esc(AIPG_ERR[PG])}</span>`:''}<span class="grow"></span>${pgNav(n,1)}</div></div><div class="R"><textarea id="pgNote" rows="1" placeholder="這一頁的筆記…" aria-label="這一頁的筆記">${esc(pn||'')}</textarea></div></div>`;
-  if(!P.length) h+=`<div class="r2"><div class="L"><div class="notext">${BOOK.meta.hasText?'這一頁沒有文字（可能是圖片或空白頁）。':'這本 PDF 是掃描圖片，抽不出文字。'}<br><button type="button" class="small" style="margin-top:10px" data-mode-go="pdf">看原始頁面</button></div></div><div class="R"></div></div>`;
-  else h+=P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div><div class="R"></div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${isTxt(t)&&/^• /.test(t)?' li':''}${DIV?(isLabel(t)?' dvl':' dvt'):''}${DIV&&i===0?' dv1':''}${!DIV&&isLabel(t)?' lbl':''}${kind[i].includes('hd')?' hd':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div>
-    <div class="R">${(byPara[i]||[]).map(o=>cardHtml(o)).join('')}${paraNoteHtml(PG,i)}</div></div>`).join('');
-  h+=`<div class="r2 rf"><div class="L"><div class="rfoot">${pgNav(n)}</div></div><div class="R"></div></div>`;
-  sh.innerHTML=h; sh.querySelectorAll('textarea').forEach(autoGrow); paginate();
+  const DIV=isDivider(P);
+  if(!P.length) return `<div class="r2 rc" data-i="0"><div class="L"><div class="notext">${BOOK.meta.hasText?'這一頁沒有文字（可能是圖片或空白頁）。':'這本 PDF 是掃描圖片，抽不出文字。'}<br><button type="button" class="small" style="margin-top:10px" data-mode-go="pdf">看原始頁面</button></div></div></div>`;
+  return P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${/^• /.test(t)?' li':''}${DIV?(isLabel(t)?' dvl':' dvt'):''}${DIV&&i===0?' dv1':''}${!DIV&&isLabel(t)?' lbl':''}${kind[i].includes('hd')?' hd':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${PG}_${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div></div>`).join(''); }
+function renderPage(){
+  const sh=$('sheet'), n=nPages(); TWO=twoOK(); BASE=TWO?PG-(PG%2):PG; PG=BASE;
+  const sides=[BASE].concat(TWO&&BASE+1<n?[BASE+1]:[]);
+  let h=`<div class="r2 rhead"><div class="L"><div class="ptop"><span class="runhead" title="${esc(BOOK.meta.title)}">${esc(String(BOOK.meta.title).split(/[:：]/)[0])}</span>${AIPG_ERR[PG]?`<span class="err" style="margin-left:8px">${esc(AIPG_ERR[PG])}</span>`:''}<span class="grow"></span>${pgNav(n,1)}</div></div></div>`;
+  h+=`<div class="spread${TWO?' two':''}">${sides.map(p=>`<div class="side" data-side="${p}">${withPg(p,pageRows)}${TWO?`<div class="sfolio">${p+1}</div>`:''}</div>`).join('')}</div>`;
+  h+=`<div class="r2 rf"><div class="L"><div class="rfoot">${pgNav(n)}</div></div></div>`;
+  sh.innerHTML=h; sh.classList.toggle('two',TWO); paginate();
   sh.querySelectorAll('.fig img').forEach(im=>{ if(!im.complete) im.addEventListener('load',()=>{ if(BOOK&&!$('vRead').hidden) paginate(firstShown()); },{once:true}); });
+  const used=pageUsed(PG), aiBusy=AIPG[PG], P=paras(PG);
   const ab=$('aiPgBtn'), bad=(BOOK.meta.ocrBad||[]).includes(PG); ab.hidden=!P.some(isTxt); ab.disabled=!!(used||aiBusy); ab.classList.toggle('warn',bad&&!used); ab.classList.toggle('busy',!!aiBusy);
   ab.title=used?'這一頁已經有螢光筆、筆記或翻譯，不能再用 AI 整理':aiBusy?'AI 整理中…':bad?'⚠ 這頁可能有辨識錯字：按一下用 AI 修正':'用 AI 整理這一頁（重新分段、修正 OCR 錯字）';
 }
@@ -1175,12 +1203,35 @@ function savePos(){ clearTimeout(pgT); pgT=setTimeout(()=>{ if(!BOOK) return; co
 // 原書每一頁的寬度（點），用來算圖在原書上有多大
 const PAGEW={}; const PAGEW0=432;
 function pageWidth(pg){ if(!PDF||PAGEW[pg]) return; PDF.getPage(pg+1).then(p=>{ const v=p.view; PAGEW[pg]=Math.abs(v[2]-v[0])||PAGEW0; if(pg===PG&&MODE==='text') paginate(firstShown()); }).catch(()=>{}); }
+// 雙頁：兩邊各是原書的一頁。圖照原書的比例；放不下就兩邊一起把字縮小（最多到 78%），還是放不下那一邊才可以捲動
+function paginateTwo(sh,avail){
+  const sides=[...sh.querySelectorAll('.side')];
+  sides.forEach(sd=>{ const p=+sd.dataset.side, pw=PAGEW[p]||PAGEW0; if(!PAGEW[p]) pageWidth(p); sd.classList.remove('over');
+    const rows=[...sd.querySelectorAll(':scope>.rc')], onlyFig=rows.length&&rows.every(r=>r.querySelector('.fig'));
+    rows.forEach(r=>{ const f=r.querySelector(':scope>.L>.fig'); if(!f) return; f.style.zoom=''; f.style.marginTop='';
+      const im=f.querySelector('img'), cap=f.querySelector('figcaption'), ch=(cap?cap.offsetHeight:0)+20;
+      if(im){ const iw=+im.dataset.w||800, ih=+im.dataset.h||600, colW=f.clientWidth||400;
+        let tw=Math.max(60,colW*Math.min(1,(iw/2)/pw)); if(onlyFig) tw=colW; tw=Math.min(tw,(avail-ch-30)*iw/ih);
+        im.style.width=tw+'px'; im.style.maxHeight='none'; } }); });
+  const hOf=sd=>[...sd.querySelectorAll(':scope>.rc')].reduce((a,r)=>a+r.offsetHeight,0);
+  const over=()=>sides.some(sd=>hOf(sd)>avail-26);
+  sh.style.removeProperty('--fs');
+  if(over()) for(const k of [0.95,0.9,0.86,0.82,0.78,0.74,0.7,0.66]){ sh.style.setProperty('--fs',Math.max(12,FS*k)+'px'); if(!over()) break; }
+  sides.forEach(sd=>{ if(hOf(sd)>avail-26){ sd.classList.add('over'); sd.style.height=(avail-6)+'px'; } else sd.style.height=''; });
+  SUBG=[[...sh.querySelectorAll('.side>.rc')].map(r=>({r,off:0,h:r.offsetHeight}))]; SUBN=1; SUB=0; SUB_END=false;
+  const n=nPages(), last=sides.length?+sides[sides.length-1].dataset.side:PG;
+  sh.querySelectorAll('[data-turn="-1"]').forEach(b=>b.disabled=PG<=0); sh.querySelectorAll('[data-turn="1"]').forEach(b=>b.disabled=last>=n-1);
+  $('prev').disabled=PG<=0; $('next').disabled=last>=n-1;
+  const fo=sh.querySelector('.folio'); if(fo) fo.innerHTML=`— ${PG+1}${last!==PG?'・'+(last+1):''} —<span class="pgpct">${Math.round((last+1)/Math.max(1,n)*100)}%</span>`;
+  rs_scrollTop0(); if(BOOK) savePos(); }
+function rs_scrollTop0(){ const rs=$('rs'); rs.classList.remove('tall'); rs.scrollTop=0; }
 function paginate(keep){
   // 把這一頁的段落分成好幾個畫面。keep＝要放在畫面最上面的那一段（放大縮小字、換視窗大小時，正在讀的那段不會跑掉）
   const sh=$('sheet'), rs=$('rs'); if(MODE!=='text'||!sh||sh.hidden) return;
-  const rows=[...sh.querySelectorAll(':scope>.rc')]; rows.forEach(r=>{ r.classList.remove('off','cut'); r.style.height=''; r.style.removeProperty('--off'); });   // 先還原再量高度
+  const rows=[...sh.querySelectorAll('.side>.rc')]; rows.forEach(r=>{ r.classList.remove('off','cut'); r.style.height=''; r.style.removeProperty('--off'); });   // 先還原再量高度
   const head=sh.querySelector(':scope>.rhead'), foot=sh.querySelector(':scope>.rf');
   const avail=rs.clientHeight-(head?head.offsetHeight:0)-(foot?foot.offsetHeight:0)-18;
+  if(TWO) return paginateTwo(sh,avail);
   if(keep===undefined&&RESTORE!=null){ keep=rows.find(r=>(r.dataset.i||r.dataset.fi)==RESTORE); RESTORE=null; }
   if((!keep||!rows.includes(keep))&&ANCHOR&&ANCHOR.pg===PG&&ANCHOR.book===(BOOK&&BOOK.meta.id)&&!SUB_END) keep=rows.find(r=>(r.dataset.i||r.dataset.fi)==ANCHOR.i);
   // 每一段變成一個或好幾個「片段」：放得下就是整段；太長的段落在行與行之間切開，後半段接到下一個畫面（不用上下捲）
@@ -1240,7 +1291,7 @@ function showSub(){
   const head=sh.querySelector(':scope>.rhead'), foot=sh.querySelector(':scope>.rf');
   const avail=rs.clientHeight-(head?head.offsetHeight:0)-(foot?foot.offsetHeight:0)-18;
   const cur=G[SUB]||[], on=new Set(cur.map(u=>u.r));
-  sh.querySelectorAll(':scope>.rc').forEach(r=>{ r.classList.toggle('off',!on.has(r)); r.classList.remove('cut'); r.style.height=''; r.style.removeProperty('--off'); });
+  sh.querySelectorAll('.side>.rc').forEach(r=>{ r.classList.toggle('off',!on.has(r)); r.classList.remove('cut'); r.style.height=''; r.style.removeProperty('--off'); });
   cur.forEach(u=>{ if(u.cut){ u.r.classList.add('cut'); u.r.style.height=u.h+'px'; u.r.style.setProperty('--off',(-u.off)+'px'); } });   // 長段落：只露出這一截
   rs.classList.remove('tall'); rs.scrollTop=0;
   const n=nPages(), first=PG<=0&&SUB<=0, last=PG>=n-1&&SUB>=SUBN-1;
@@ -1263,18 +1314,19 @@ $('rs').addEventListener('wheel',e=>{
 },{passive:false});
 function turn(d){
   if(!BOOK) return; hidePop(); if(typeof hideCard==='function') hideCard();
+  if(MODE==='text'&&TWO){ const n=nPages(), to=BASE+2*d; if(to<0||to>n-1) return; return showPage(to,d); }
   if(MODE==='text'&&d>0&&SUB<SUBN-1){ SUB++; slide(1); return showSub(); }
   if(MODE==='text'&&d<0&&SUB>0){ SUB--; slide(-1); return showSub(); }
   if(d<0&&PG>0){ SUB_END=MODE==='text'; showPage(PG-1); } else if(d>0) showPage(PG+1); }
 function slide(d){ const sh=$('sheet'); sh.classList.remove('tn','tp'); void sh.offsetWidth; sh.classList.add(d>0?'tn':'tp'); }
-function rowOf(el){ return el&&el.closest('#sheet>.rc'); }
-let rzT=null; addEventListener('resize',()=>{ clearTimeout(rzT); rzT=setTimeout(()=>{ if(BOOK&&MODE==='text'&&!$('vRead').hidden) paginate(firstShown()); else if(BOOK&&MODE==='pdf') renderPdfPage(); },120); });
+function rowOf(el){ return el&&el.closest('#sheet .rc'); }
+let rzT=null; addEventListener('resize',()=>{ clearTimeout(rzT); rzT=setTimeout(()=>{ if(BOOK&&MODE==='text'&&!$('vRead').hidden&&twoOK()!==TWO) renderPage(); else if(BOOK&&MODE==='text'&&!$('vRead').hidden) paginate(firstShown()); else if(BOOK&&MODE==='pdf') renderPdfPage(); },120); });
 function autoGrow(t){ t.style.height='auto'; t.style.height=Math.max(t.scrollHeight+2,t.classList.contains('pnote')?32:38)+'px'; }
 
 /* ---------- 選取 → 螢光筆 ---------- */
 function offIn(el,node,off){ const r=document.createRange(); r.setStart(el,0); try{ r.setEnd(node,off); }catch(e){ return 0; } return r.toString().length; }
 function selSegs(range){
-  const out=[]; document.querySelectorAll('#sheet .ptx').forEach(el=>{ if(!range.intersectsNode(el)) return; const i=+el.dataset.k, L=paras(PG)[i].length;
+  const out=[]; document.querySelectorAll(`#sheet [data-side="${PG}"] .ptx`).forEach(el=>{ if(!range.intersectsNode(el)) return; const i=+el.dataset.k, L=paras(PG)[i].length;
     const s=el.contains(range.startContainer)?offIn(el,range.startContainer,range.startOffset):0;
     const e=el.contains(range.endContainer)?offIn(el,range.endContainer,range.endOffset):L;
     if(e>s) out.push([i,Math.max(0,s),Math.min(L,e)]); });
@@ -1282,7 +1334,7 @@ function selSegs(range){
 function cut(list,s,e){ const out=[]; for(const r of list){ if(r[1]<=s||r[0]>=e){ out.push(r); continue; } if(r[0]<s) out.push([r[0],s,r[2],r[3]]); if(r[1]>e) out.push([e,r[1],r[2],r[3]]); } return out; }
 function trimWs(i,s,e){ const t=paras(PG)[i]; while(s<e&&/\s/.test(t[s])) s++; while(e>s&&/\s/.test(t[e-1])) e--; return [s,e]; }
 function applyMark(segs,color,nid){
-  segs.forEach(([i,s,e])=>{ [s,e]=trimWs(i,s,e); if(e<=s) return; const k=mkey(PG,i); const L=cut(ST.marks[k]||[],s,e); if(color) L.push([s,e,color,nid||'']); L.sort((a,b)=>a[0]-b[0]); if(L.length) ST.marks[k]=L; else delete ST.marks[k]; });
+  segs.forEach(([i,s,e])=>{ [s,e]=trimWs(i,s,e); if(e<=s) return; const k=mkey(PG,i); const L=cut(ST.marks[k]||[],s,e); if(color||nid) L.push([s,e,color||0,nid||'']); L.sort((a,b)=>a[0]-b[0]); if(L.length) ST.marks[k]=L; else delete ST.marks[k]; });
   gcNotes(); save(); renderPage(); if(!$('allPane').hidden) renderAll(); }
 function gcNotes(){ const used=new Set(); Object.values(ST.marks).forEach(L=>L.forEach(r=>r[3]&&used.add(r[3])));
   for(const [id,n] of Object.entries(ST.notes)) if(!used.has(id)&&!String(n.text||'').trim()) delete ST.notes[id]; }
@@ -1294,7 +1346,36 @@ function segsOfMark(i,s){ const r=(ST.marks[mkey(PG,i)]||[]).find(x=>x[0]===s); 
   if(!r[3]) return {segs:[[i,r[0],r[1]]],r};
   const segs=[]; paras(PG).forEach((_,j)=>(ST.marks[mkey(PG,j)]||[]).forEach(x=>{ if(x[3]===r[3]) segs.push([j,x[0],x[1]]); })); return {segs,r}; }
 function addNoteFor(segs,color,existing){ const nid=newId(); ST.notes[nid]={text:'',quote:quoteOf(segs),page:PG,i:segs[0][0],t:Date.now()}; applyMark(segs,existing?existing[2]:(color||1),nid); focusNote(nid); }
-function focusNote(nid){ const c=document.querySelector(`#sheet .hcard[data-nid="${nid}"]`); if(!c) return; paginate(rowOf(c)); c.classList.add('focus'); setTimeout(()=>c.classList.remove('focus'),1500);
+/* ---------- 筆記（跟雅思練習室一樣）：選取文字 →「筆記」→ 小框框裡寫；有筆記的地方畫虛線，點一下就打開 ---------- */
+let NOTEEL=null;
+function noteClose(){ if(NOTEEL){ NOTEEL.remove(); NOTEEL=null; document.removeEventListener('mousedown',noteOut,true); } }
+function noteOut(e){ if(NOTEEL&&!NOTEEL.contains(e.target)&&!e.target.closest('.askbox')) noteClose(); }
+function noteBox(rect,text,quote,onSave,onDel,onAsk){ hidePop(); noteClose(); const d=document.createElement('div'); d.className='notebox'; NOTEEL=d;
+  d.innerHTML=`<div class="askhead"><b>筆記</b><button type="button" class="ib ghost" data-nb="x" aria-label="關閉"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    ${quote?`<div class="askquote" lang="en">${esc(quote.length>200?quote.slice(0,200)+'…':quote)}</div>`:''}
+    <textarea rows="4" maxlength="4000" placeholder="寫下你的筆記…">${esc(text||'')}</textarea>
+    <div class="askfoot"><button type="button" class="small primary" data-nb="save">儲存</button>${onAsk?`<button type="button" class="small" data-nb="ask">${qaOf(text).qa.length?'繼續問 AI':'問 AI'}</button>`:''}${onDel?'<button type="button" class="small ghost danger" data-nb="del">刪除筆記</button>':''}<span class="note">⌘/Ctrl + Enter 儲存</span></div>`;
+  d.style.left=Math.max(8,Math.min(innerWidth-380,rect.left))+'px'; d.style.top=Math.max(8,Math.min(innerHeight-300,(rect.bottom||rect.top)+8))+'px';
+  document.body.appendChild(d); dragBox(d); const ta=d.querySelector('textarea'); ta.focus(); ta.selectionStart=ta.value.length;
+  setTimeout(()=>document.addEventListener('mousedown',noteOut,true),0);
+  ta.addEventListener('keydown',e=>{ if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){ e.preventDefault(); d.querySelector('[data-nb="save"]').click(); } if(e.key==='Escape') noteClose(); });
+  d.addEventListener('click',e=>{ const b=e.target.closest('[data-nb]'); if(!b) return; const k=b.dataset.nb;
+    if(k==='x') noteClose();
+    else if(k==='save'){ const v=ta.value.trim(); noteClose(); if(v) onSave(v); else if(onDel) onDel(); }
+    else if(k==='del'){ if(!confirm('刪除這則筆記？')) return; noteClose(); onDel(); }
+    else if(k==='ask'){ const v=ta.value, rc=d.getBoundingClientRect(); noteClose(); onAsk(v,rc); } }); }
+// 新的筆記：選到的字畫虛線（原本有螢光筆就保留顏色）
+function newNote(segs,existing,rect){ const pg=PG, quote=quoteOf(segs);
+  noteBox(rect,'',quote,v=>withPg(pg,()=>{ const nid=newId(); ST.notes[nid]={text:v,quote,page:pg,i:segs[0][0],t:Date.now()}; applyMark(segs,existing?existing[2]:0,nid); toast('筆記已儲存'); }),
+    null,(cur,rc)=>withPg(pg,()=>askBox(rc,quote,askCtx(segs.map(s=>s[0])),txt=>{ const nid=newId(); ST.notes[nid]={text:(cur.trim()?cur.trim()+'\n\n':'')+txt,quote,page:pg,i:segs[0][0],t:Date.now()}; applyMark(segs,existing?existing[2]:0,nid); toast('問答已存成筆記'); }))); }
+// 打開已經有的筆記：可以改、刪、繼續問 AI
+function openNote(nid,rect){ const n=ST.notes[nid]; if(!n) return; const pg=n.page;
+  if(!rect){ const m=document.querySelector(`#sheet mark[data-nid="${nid}"]`); rect=m?m.getBoundingClientRect():{left:innerWidth/2-180,bottom:innerHeight/3}; }
+  noteBox(rect,n.text,n.quote,v=>{ n.text=v; n.t=Date.now(); save(); renderPage(); if(!$('allPane').hidden) renderAll(); toast('筆記已儲存'); },
+    ()=>{ for(const k of Object.keys(ST.marks)){ ST.marks[k]=ST.marks[k].map(r=>r[3]===nid?(r[2]?[r[0],r[1],r[2],'']:null):r).filter(Boolean); if(!ST.marks[k].length) delete ST.marks[k]; } delete ST.notes[nid]; save(); renderPage(); if(!$('allPane').hidden) renderAll(); toast('筆記已刪除'); },
+    (cur,rc)=>{ const Q=qaOf(cur); withPg(pg,()=>askBox(rc,n.quote||'',askCtx([n.i|0]),txt=>{ n.text=(Q.pre?Q.pre+'\n\n':'')+txt; n.t=Date.now(); save(); renderPage(); toast('問答已更新'); },Q.qa)); }); }
+function focusNote(nid){ return openNote(nid); }
+function focusNote_old(nid){ const c=document.querySelector(`#sheet .hcard[data-nid="${nid}"]`); if(!c) return; paginate(rowOf(c)); c.classList.add('focus'); setTimeout(()=>c.classList.remove('focus'),1500);
   const ta=c.querySelector('textarea'); if(ta) ta.focus({preventScroll:true}); }
 
 /* ---------- 問 AI：選取文字 → 小視窗裡問問題，可以一直追問，問答存成筆記（顯示在那一段右邊）---------- */
@@ -1340,8 +1421,8 @@ function askBox(rect,sel,ctx,onSave,init){ hidePop(); askClose(); const d=docume
     else if(k==='save'){ const txt=H.filter(x=>x.a).map(x=>'Q：'+x.q+'\nA：'+x.a.replace(/\*\*/g,'')).join('\n\n'); askClose(); onSave(txt); } }); }
 // 問答存成筆記：選到的字畫上螢光筆、筆記放問答（右邊那一段旁邊看得到；全部筆記裡也有）
 function saveAskNote(segs,existing,txt){
-  if(existing&&existing[3]&&ST.notes[existing[3]]){ const n=ST.notes[existing[3]]; n.text=(String(n.text||'').trim()?n.text.trim()+'\n\n':'')+txt; n.t=Date.now(); save(); renderPage(); focusNote(existing[3]); toast('問答已存到筆記'); return; }
-  const nid=newId(); ST.notes[nid]={text:txt,quote:quoteOf(segs),page:PG,i:segs[0][0],t:Date.now()}; applyMark(segs,existing?existing[2]:3,nid); focusNote(nid); toast('問答已存成筆記'); }
+  if(existing&&existing[3]&&ST.notes[existing[3]]){ const n=ST.notes[existing[3]]; n.text=(String(n.text||'').trim()?n.text.trim()+'\n\n':'')+txt; n.t=Date.now(); save(); renderPage(); toast('問答已存到筆記'); return; }
+  const nid=newId(); ST.notes[nid]={text:txt,quote:quoteOf(segs),page:PG,i:segs[0][0],t:Date.now()}; applyMark(segs,existing?existing[2]:0,nid); toast('問答已存成筆記'); }
 document.addEventListener('click',e=>{ const b=e.target.closest('[data-askmore]'); if(!b) return; const nid=b.dataset.askmore, n=ST.notes[nid]; if(!n) return;
   const Q=qaOf(n.text), i=n.i|0;
   askBox(b.getBoundingClientRect(),n.quote||'',askCtx([i]),txt=>{ n.text=(Q.pre?Q.pre+'\n\n':'')+txt; n.t=Date.now(); save(); renderPage(); focusNote(nid); toast('問答已更新'); },Q.qa); });
@@ -1363,26 +1444,30 @@ function showPop(x,y,ctx){
   document.body.appendChild(d); POP=d;
   const w=d.offsetWidth, h=d.offsetHeight; d.style.left=Math.max(8,Math.min(innerWidth-w-8,x-w/2))+'px'; d.style.top=(y-h-10<64?y+28:y-h-10)+'px';
   d.addEventListener('mousedown',e=>e.preventDefault());
-  d.onclick=e=>{ const b=e.target.closest('button'); if(!b) return; getSelection().removeAllRanges(); hidePop();
+  d.onclick=e=>{ const b=e.target.closest('button'); if(!b) return; getSelection().removeAllRanges(); hidePop(); withPg(ctx.pg!=null?ctx.pg:PG,()=>{
     if(b.dataset.c) applyMark(ctx.segs,+b.dataset.c,ctx.existing?ctx.existing[3]:'');
     else if(b.dataset.a==='clear') applyMark(ctx.segs,0);
     else if(b.dataset.a==='copy') navigator.clipboard&&navigator.clipboard.writeText(ctx.quote).then(()=>toast('已複製'),()=>{});
     else if(b.dataset.a==='word') saveWord(one,sctx);
     else if(b.dataset.a==='phr') savePhrase(one,sctx);
     else if(b.dataset.a==='ask'){ const rc={left:x-180,bottom:y+20}; askBox(rc,ctx.quote,askCtx(ctx.segs.map(s=>s[0])),txt=>saveAskNote(ctx.segs,ctx.existing,txt)); }
-    else if(b.dataset.a==='note'){ if(ctx.existing&&ctx.existing[3]) focusNote(ctx.existing[3]); else addNoteFor(ctx.segs,1,ctx.existing); } };
+    else if(b.dataset.a==='note'){ const rc={left:x-150,bottom:y+20};
+      if(ctx.existing&&ctx.existing[3]&&ST.notes[ctx.existing[3]]) openNote(ctx.existing[3],rc); else newNote(ctx.segs,ctx.existing,rc); } }); };
 }
 $('sheet').addEventListener('mouseup',()=>setTimeout(()=>{
   const sel=getSelection(); if(!sel||sel.isCollapsed||!sel.rangeCount) return; const range=sel.getRangeAt(0);
   if(!$('sheet').contains(range.commonAncestorContainer)) return;
-  const segs=selSegs(range); if(!segs.length) return;
-  const hasMark=segs.some(([i,s,e])=>(ST.marks[mkey(PG,i)]||[]).some(r=>r[0]<e&&r[1]>s));     // 選到的地方有螢光筆：可以清除
-  const rc=range.getBoundingClientRect(); showPop(rc.left+rc.width/2,rc.top,{segs,quote:quoteOf(segs),existing:null,hasMark}); },10));
+  const el=n=>n.nodeType===1?n:n.parentElement, a=pgOf(el(range.startContainer)), b=pgOf(el(range.endContainer));
+  if(a!==b) return;                                                   // 跨兩頁的選取：不處理
+  withPg(a,()=>{ const segs=selSegs(range); if(!segs.length) return;
+    const hasMark=segs.some(([i,s,e])=>(ST.marks[mkey(PG,i)]||[]).some(r=>r[0]<e&&r[1]>s&&r[2]));     // 選到的地方有螢光筆：可以清除
+    const rc=range.getBoundingClientRect(); showPop(rc.left+rc.width/2,rc.top,{segs,quote:quoteOf(segs),existing:null,hasMark,pg:a}); }); },10));
 document.addEventListener('mousedown',e=>{ if(POP&&!e.target.closest('.hlpop')) hidePop(); });
 $('rs').addEventListener('scroll',()=>hidePop(),{passive:true});
 
 /* ---------- 頁面上的點擊、輸入 ---------- */
-$('sheet').addEventListener('click',e=>{
+$('sheet').addEventListener('click',e=>withPg(pgOf(e.target),()=>sheetClick(e)));
+function sheetClick(e){
   const t=e.target;
   const g=t.closest('[data-mode-go]'); if(g){ MODE=g.dataset.modeGo; LS.set('mode',MODE); return showPage(PG); }
   const tn=t.closest('[data-turn]'); if(tn) return turn(+tn.dataset.turn);
@@ -1398,7 +1483,8 @@ $('sheet').addEventListener('click',e=>{
     else { const v=VOCM[+ul.dataset.vw]; if(v){ v._ctx=ctx; return vwCard(v,rc); } } }
   const mk=t.closest('mark.hl'); if(!mk) return; const i=+mk.closest('.ptx').dataset.k;
   const o=segsOfMark(i,+mk.dataset.s); if(!o) return; const rc=mk.getBoundingClientRect();
-  showPop(rc.left+rc.width/2,rc.top,{segs:o.segs,quote:quoteOf(o.segs),existing:o.r}); });
+  if(o.r[3]&&ST.notes[o.r[3]]&&String(ST.notes[o.r[3]].text||'').trim()) return openNote(o.r[3],rc);      // 有筆記的地方（虛線）：打開筆記
+  showPop(rc.left+rc.width/2,rc.top,{segs:o.segs,quote:quoteOf(o.segs),existing:o.r,pg:PG}); }
 function handleCard(e){   // 筆記卡片上的按鈕（頁面和全書筆記共用）
   const card=e.target.closest('.hcard[data-key]'); if(!card) return false; const pg=+card.dataset.pg;
   if(e.target.closest('[data-jump]')){ jumpTo(pg,+card.dataset.i,card.dataset.nid); return true; }
@@ -1409,16 +1495,17 @@ function handleCard(e){   // 筆記卡片上的按鈕（頁面和全書筆記共
     else { const [i,s]=card.dataset.key.split(':').map(Number), k=mkey(pg,i); ST.marks[k]=(ST.marks[k]||[]).filter(r=>r[0]!==s); if(!ST.marks[k].length) delete ST.marks[k]; }
     save(); if(pg===PG&&MODE==='text') renderPage(); if(!$('allPane').hidden) renderAll(); return true; }
   return false; }
-function jumpTo(pg,i,nid){ if(pg!==PG||MODE!=='text'){ MODE='text'; LS.set('mode',MODE); showPage(pg); }
-  const p=$('en'+i); if(!p) return; paginate(rowOf(p)); p.classList.remove('flash'); void p.offsetWidth; p.classList.add('flash');
+function jumpTo(pg,i,nid){ if((pg!==PG&&!(TWO&&pg===PG+1))||MODE!=='text'){ MODE='text'; LS.set('mode',MODE); showPage(pg); }
+  const p=$('en'+pg+'_'+i); if(!p) return; if(!TWO) paginate(rowOf(p)); p.classList.remove('flash'); void p.offsetWidth; p.classList.add('flash');
   if(nid) document.querySelectorAll(`#sheet mark[data-nid="${nid}"]`).forEach(m=>{ m.classList.add('lit'); setTimeout(()=>m.classList.remove('lit'),1500); }); }
 $('sheet').addEventListener('focusout',e=>{ if(e.target.matches('textarea')) setTimeout(()=>{ if(!document.activeElement||!document.activeElement.closest('#sheet textarea')) paginate(firstShown()); },0); });
-$('sheet').addEventListener('input',e=>{ const t=e.target;
+$('sheet').addEventListener('input',e=>withPg(pgOf(e.target),()=>sheetInput(e)));
+function sheetInput(e){ const t=e.target;
   if(t.matches('textarea')) autoGrow(t);
   if(t.id==='pgNote'){ const v=t.value; if(v.trim()) ST.pageNotes[PG]=v; else delete ST.pageNotes[PG]; return save(); }
   if(t.matches('[data-note]')){ const n=ST.notes[t.dataset.note]; if(n){ n.text=t.value; n.t=Date.now(); save(); } return; }
   if(t.matches('[data-pnt]')){ const k=mkey(PG,+t.dataset.pnt); if(t.value.trim()) ST.paraNotes[k]=t.value; else delete ST.paraNotes[k]; t.classList.toggle('has',!!t.value.trim()); return save(); }
-  if(t.matches('[data-zh]')&&ST.zh[PG]){ ST.zh[PG][+t.dataset.zh]=t.innerText.trim(); save(); } });
+  if(t.matches('[data-zh]')&&ST.zh[PG]){ ST.zh[PG][+t.dataset.zh]=t.innerText.trim(); save(); } }
 
 // 滑到段落／卡片：兩邊一起亮
 $('sheet').addEventListener('mouseover',e=>{ const r=e.target.closest('.r2[data-i]'); document.querySelectorAll('#sheet .r2.hov').forEach(x=>{ if(x!==r) x.classList.remove('hov'); }); if(r) r.classList.add('hov');
@@ -1547,10 +1634,10 @@ function notesPage(q){
         <div class="nwall">${A.sort((a,b)=>a.page-b.page||a.i-b.i).map(card).join('')}</div></div>`).join('')
       :`<div class="empty"><b>${q||NBOOK?'沒有符合的筆記':'還沒有筆記'}</b><span class="note">讀書時選取文字，按 ✎ 寫筆記，或按 💬 問 AI 再存成筆記，就會出現在這裡。</span></div>`}</div>`; }
 document.addEventListener('change',e=>{ if(e.target.id==='nbook'){ NBOOK=e.target.value; LS.set('nbook',NBOOK); renderLib(); } });
-async function openNote(el){ const bid=el.dataset.nopen, pg=+el.dataset.pg, i=+el.dataset.i, nid=el.dataset.nid||'';
+async function openNoteFromList(el){ const bid=el.dataset.nopen, pg=+el.dataset.pg, i=+el.dataset.i, nid=el.dataset.nid||'';
   await openBook(bid); if(!BOOK||BOOK.meta.id!==bid) return; setTimeout(()=>jumpTo(pg,i,nid),60); }
-document.addEventListener('click',e=>{ const c=e.target.closest('[data-nopen]'); if(c&&!getSelection().toString()) openNote(c); });
-document.addEventListener('keydown',e=>{ if(e.key==='Enter'&&e.target.matches&&e.target.matches('[data-nopen]')) openNote(e.target); });
+document.addEventListener('click',e=>{ const c=e.target.closest('[data-nopen]'); if(c&&!getSelection().toString()) openNoteFromList(c); });
+document.addEventListener('keydown',e=>{ if(e.key==='Enter'&&e.target.matches&&e.target.matches('[data-nopen]')) openNoteFromList(e.target); });
 
 /* ---------- 小卡片 ---------- */
 function hideCard(){ if(WCARD){ WCARD.remove(); WCARD=null; } }

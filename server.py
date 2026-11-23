@@ -486,7 +486,7 @@ def clean_pages(pages, frozen=()):
                 x = re.sub(r'^(?:[-–]|[a-z])\s+(?=[A-Z"“‘])', '', x)         # 章節開頭的裝飾字被辨識成「-」或一個小寫字母
                 x = re.sub(r'^[-–]\s+(?=[a-z])', '', x)                       # 「- twins, and they…」：換行的連字號跑到段落開頭
                 x = re.sub(r'(\d)- (?=[A-Z])', r'\1. ', x)                       # 「summer of 1994- Looking」：句號被認成「-」
-                x = re.sub(r'(?<=[.!?"”’)])\s?(\d{1,3}(?:,\s?\d{1,3})*)(?=\s+[A-Z"“‘]|\s*$)', lambda m: m.group(0) if NOT_FN.search(m.string[:m.start()]) else m.group(1).replace(' ', '').translate(SUPS), x)   # 註腳編號：書上的上標 ¹⁹ 被讀成一般數字「baseline. 19」→ 改回上標「baseline.¹⁹」
+                x = re.sub(r'(?<![0-9]\.)(?<=[.!?"”’)])\s?(\d{1,3}(?:,\s?\d{1,3})*)(?=\s+[A-Z"“‘]|\s*$)', lambda m: m.group(0) if NOT_FN.search(m.string[:m.start()]) else m.group(1).replace(' ', '').translate(SUPS), x)   # 註腳編號：書上的上標 ¹⁹ 被讀成一般數字「baseline. 19」→ 改回上標「baseline.¹⁹」
                 if not x or re.fullmatch(r'(page\s*)?[\divxlc]{1,5}', x, re.I): continue      # 只有頁碼
                 if re.search(r'©', x) and re.search(r'\bDOI\b|Press\b', x) and len(x) < 400: continue   # 出版社的版權聲明（每章開頭都有）
                 if re.fullmatch(r'[A-HJ-Za-z]{1,2}|[^\w\s]{1,3}', x): continue           # 裝飾字、單獨一兩個字母（「N」）
@@ -508,7 +508,7 @@ def clean_pages(pages, frozen=()):
             for i, x in enumerate(pg):
                 k = _hkey(x) if is_text(x) and i in edge and _headish(x) else None
                 if k in heads:
-                    if k not in seen: seen.add(k); keep.append(x); continue
+                    if k not in seen and not re.search(r'^\s*\d{1,4}\s+\S|\S\s+\d{1,4}\s*$', x): seen.add(k); keep.append(x); continue   # 帶頁碼的一定是頁首
                     if p not in frozen: continue
                 keep.append(x)
             pages[p] = keep

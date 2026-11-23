@@ -480,13 +480,15 @@ def clean_pages(pages, frozen=()):
                 toks = x.split()
                 while toks and _noise_tok(toks[0]): toks.pop(0)
                 x = ' '.join(toks)
-                x = re.sub(r'^[•·*«»~&§¶|]+\s*', '', x)                      # 花紋、項目符號被辨識成「•」「*」「«」
+                x = re.sub(r'^[•·*«»~&§¶|]+\s*(?=[a-z,.;:]|$)', '', x)        # 花紋被辨識成「•」「*」「«」（後面接小寫才是雜訊；「• System 1…」是真的條列）
+                x = re.sub(r'^[·*«»~&§¶|]+\s*', '', x)
                 x = re.sub(r'^[,.;:]+\s+', '', x)                            # 段落開頭多出來的標點
                 x = re.sub(r'^(?:[-–]|[a-z])\s+(?=[A-Z"“‘])', '', x)         # 章節開頭的裝飾字被辨識成「-」或一個小寫字母
                 x = re.sub(r'^[-–]\s+(?=[a-z])', '', x)                       # 「- twins, and they…」：換行的連字號跑到段落開頭
                 x = re.sub(r'(\d)- (?=[A-Z])', r'\1. ', x)                       # 「summer of 1994- Looking」：句號被認成「-」
                 x = re.sub(r'(?<=[.!?"”’)])\s?(\d{1,3}(?:,\s?\d{1,3})*)(?=\s+[A-Z"“‘]|\s*$)', lambda m: m.group(0) if NOT_FN.search(m.string[:m.start()]) else m.group(1).replace(' ', '').translate(SUPS), x)   # 註腳編號：書上的上標 ¹⁹ 被讀成一般數字「baseline. 19」→ 改回上標「baseline.¹⁹」
                 if not x or re.fullmatch(r'(page\s*)?[\divxlc]{1,5}', x, re.I): continue      # 只有頁碼
+                if re.search(r'©', x) and re.search(r'\bDOI\b|Press\b', x) and len(x) < 400: continue   # 出版社的版權聲明（每章開頭都有）
                 if re.fullmatch(r'[A-HJ-Za-z]{1,2}|[^\w\s]{1,3}', x): continue           # 裝飾字、單獨一兩個字母（「N」）
             out.append(x)
         pages[p] = out
@@ -1250,6 +1252,7 @@ def parse_job(bid):
                         new = [re.sub(r'\s+', ' ', x).strip() if is_text(x) else x for x in items]
                         # 有些電子書的 PDF 夾帶網頁碼殘渣（height="0%">、<p 、fileposid=…）：拿掉
                         new = [re.sub(r'\s{2,}', ' ', re.sub(r'\s*(?:<\s*[A-Za-z][^<>]{0,40}>|[\w%]*="[^"<>]{0,15}">)\s*', ' ', x)).strip() if is_text(x) else x for x in new]
+                        new = [re.sub(r'%">\S*', '', x) if is_text(x) else x for x in new]          # 「It%">5¢. is」→「It is」
                         new = [x for x in new if not is_text(x) or x]
                         if i < len(raw): new = fix_dashes(new, ' '.join(x for x in raw[i] if is_text(x)))
                         if i < len(raw) and not scanned and not j.get('lineMode'):   # Docling 漏掉的段落：用 PDF 本身的文字補回來（照行的位置排的不需要）

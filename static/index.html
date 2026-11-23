@@ -691,7 +691,14 @@ document.addEventListener('click',async e=>{
   if(!confirm(`下載 ${UPDI.latest} 並重新打開 Readiverse？\n書、筆記和收藏都不會動到；正在做的解析、校對，新版打開後會接著做。`)) return;
   b.disabled=true; b.textContent='準備中…'; try{ UPDI=await api.post('/api/update',{}); }catch(err){ toast('更新失敗：'+esc(err.message)); } checkUpdate(); });
 const stTag=b=>`<span data-st="${b.id}">${aiTag(b)}</span>`;   // 背景處理的進度：只更新這一小塊，首頁不用整個重畫
+// 匯入中的書（這台電腦正在抽文字）：id → {next,total}。書一上傳就出現在書庫，封面、書名、進度即時更新
+const IMPORTING={};
+const impLive=b=>!!b.importing&&!b.pages&&Date.now()-b.importing<15*60e3;        // 別的視窗／電腦正在匯入（超過 15 分鐘還沒好：當成中斷了）
+const impDead=b=>!!b.importing&&!b.pages&&!IMPORTING[b.id]&&!impLive(b);
 function aiTag(b){ const a=b.ai||{}, r=b.parse||{}, sp='<span class="spin"></span>';
+  const im=IMPORTING[b.id]; if(im) return `<span class="aist" title="正在抽出每一頁的文字">${sp}匯入中${im.total?` ${im.next}/${im.total} 頁`:''}</span>`;
+  if(impLive(b)) return `<span class="aist" title="另一個視窗或另一台電腦正在匯入這本書">${sp}匯入中</span>`;
+  if(impDead(b)) return `<span class="aist" style="color:var(--danger,#c0392b)" title="匯入到一半被中斷了（App 關掉了？）">匯入沒完成：刪除後重新匯入</span>`;
   if(r.status==='running') return `<span class="aist" title="Docling 在背景解析版面：分段、圖片、表格">${sp}版面解析中${r.total?` ${Math.min(r.next||0,r.total)}/${r.total} 頁`:''}</span>`;
   if(r.status==='queued') return `<span class="aist">${sp}${CAPS.docling&&CAPS.docling.status==='installing'?'等 Docling 安裝好':'等待版面解析'}</span>`;
   if(a.status==='running'||a.status==='queued') return `<span class="aist">${sp}AI 判斷書名、分類中</span>`;
@@ -700,7 +707,7 @@ function aiTag(b){ const a=b.ai||{}, r=b.parse||{}, sp='<span class="spin"></spa
   const fx=b.fix||{}; if(fx.status==='running') return `<span class="aist" title="掃描書：AI 正在修正辨識錯字比較多的頁">${sp}AI 修正錯字中 ${fx.done||0}/${fx.total||0} 頁</span>`;
   if(r.status==='error') return `<span class="aist bad" title="${esc(r.error||'')}">版面解析失敗</span>`;
   if(a.status==='error') return `<span class="aist bad" title="${esc(a.error||'')}">AI 判斷失敗</span>`; return ''; }
-const busy=b=>['running','queued'].includes((b.ai||{}).status)||['running','queued'].includes((b.parse||{}).status)||(b.fix||{}).status==='running'||['running','queued'].includes((b.proof||{}).status);
+const busy=b=>!!IMPORTING[b.id]||impLive(b)||['running','queued'].includes((b.ai||{}).status)||['running','queued'].includes((b.parse||{}).status)||(b.fix||{}).status==='running'||['running','queued'].includes((b.proof||{}).status);
 let CAPS={}; async function loadCaps(){ try{ CAPS=await api.get('/api/caps'); }catch(e){} }
 let libPollT=null;
 // 首頁會變的東西（書名、作者、封面、分類…）；進度數字不算
@@ -983,36 +990,53 @@ function parasOf(lines){
     else p+=' '+l.t; });
   if(p) out.push(p);
   return out.map(s=>s.replace(/\s+/g,' ').trim()).filter(s=>s&&!/^(page\s*)?\d{1,4}$/i.test(s)); }
+function goodTitle(t){ t=String(t||'').trim(); return t.length>3&&!/^(untitled|microsoft word|document|adobe|pdf|book|ebook|\d+)$/i.test(t)&&!/\.(docx?|indd|pdf|tex)$/i.test(t); }
+function refreshCard(id){ const b=LIB.books.find(x=>x.id===id); if(!b) return; document.querySelectorAll(`[data-st="${id}"]`).forEach(el=>{ const h=aiTag(b); if(el.innerHTML!==h) el.innerHTML=h; }); }
 async function importFiles(files){
   files=[...files].filter(f=>/\.pdf$/i.test(f.name)||f.type==='application/pdf');
   if(!files.length) return toast('只能匯入 PDF 檔');
   if(!window.pdfjsLib) return toast('PDF 元件沒載入（需要網路），請重新整理再試',5000);
   const cat=FILTER.startsWith('c:')&&!$('q').value?FILTER.slice(2):'';
+  const useAi=LS.get('aiParse',true);
+  // 先把每一本都上傳：書馬上出現在書庫（封面先用書名、作者），再一本一本抽文字
+  const jobs=[];
   for(const [k,f] of files.entries()){
     const tag=files.length>1?`（${k+1}/${files.length}）`:'';
     try{
       toast(`<span class="spin"></span>上傳《${esc(f.name)}》${tag}`,0);
       const buf=await f.arrayBuffer();
       const meta=await api.post(`/api/upload?name=${encodeURIComponent(f.name)}&category=${encodeURIComponent(cat)}`,new Blob([buf]),true);
+      IMPORTING[meta.id]={next:0,total:0};
+      LIB.books=[meta,...LIB.books.filter(x=>x.id!==meta.id)]; renderLib();
+      jobs.push({f,buf,meta,tag});
+    }catch(e){ console.error(e); toast('上傳失敗：'+esc(e.message),6000); }
+  }
+  for(const {f,buf,meta,tag} of jobs){
+    const upd=m=>{ Object.assign(meta,m); const b=LIB.books.find(x=>x.id===meta.id); if(b&&b!==meta) Object.assign(b,m); };
+    try{
       const pdf=await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;
+      IMPORTING[meta.id]={next:0,total:pdf.numPages}; refreshCard(meta.id);
+      // 1) PDF 自己記的書名、作者：馬上換上（AI 之後還會再判斷，沒有標成「使用者改過」）
+      let info={}; try{ info=(await pdf.getMetadata()).info||{}; }catch(e){}
+      const patch={}; if(String(info.Author||'').trim()&&String(info.Author).length<120) patch.author=String(info.Author).trim();
+      if(goodTitle(info.Title)) patch.title=String(info.Title).replace(/\.pdf$/i,'').trim();
+      if(Object.keys(patch).length){ try{ upd(await api.patch(`/api/books/${meta.id}`,patch)); renderLib(); }catch(e){} }
+      // 2) 封面：第一頁文字很少（像真正的封面）就拿來當封面，先做（不用等全部文字抽完）
+      try{ const p1=await pdf.getPage(1), tc1=await p1.getTextContent(), p1chars=tc1.items.map(x=>x.str).join('').length;
+        if(p1chars<300){ const vp0=p1.getViewport({scale:1}), vp=p1.getViewport({scale:360/vp0.width}); const c=document.createElement('canvas'); c.width=vp.width; c.height=vp.height;
+          await p1.render({canvasContext:c.getContext('2d'),viewport:vp}).promise; const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.82)); upd(await api.put(`/api/books/${meta.id}/cover`,blob,true)); renderLib(); } }catch(e){ console.warn('cover',e); }
+      // 3) 每一頁的文字：卡片上顯示「匯入中 n/總頁數」
       const pages=[];
       for(let i=1;i<=pdf.numPages;i++){
-        if(i%5===1||i===pdf.numPages) toast(`<span class="spin"></span>抽出文字《${esc(f.name)}》${tag} ${i}/${pdf.numPages} 頁`,0);
+        if(i%5===1||i===pdf.numPages){ IMPORTING[meta.id]={next:i,total:pdf.numPages}; refreshCard(meta.id); toast(`<span class="spin"></span>抽出文字《${esc(meta.title||f.name)}》${tag} ${i}/${pdf.numPages} 頁`,0); }
         const pg=await pdf.getPage(i); const tc=await pg.getTextContent(); pages.push(parasOf(linesOf(tc.items))); pg.cleanup(); }
-      let info={}; try{ info=(await pdf.getMetadata()).info||{}; }catch(e){}
-      const useAi=LS.get('aiParse',true); const patch={}; if(info.Author) patch.author=info.Author; if(!useAi&&info.Title&&info.Title.length>3&&!/^(untitled|microsoft word|document)/i.test(info.Title)) patch.title=info.Title.replace(/\.pdf$/i,'').trim();
-      // 封面：第一頁文字很少（像真正的封面）才拿來當封面；滿滿文字的就用設計好的封面（書名＋作者）
-      const p1chars=(pages[0]||[]).join('').length;
-      if(p1chars<300) try{ const p1=await pdf.getPage(1), vp0=p1.getViewport({scale:1}), vp=p1.getViewport({scale:360/vp0.width}); const c=document.createElement('canvas'); c.width=vp.width; c.height=vp.height;
-        await p1.render({canvasContext:c.getContext('2d'),viewport:vp}).promise; const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.82)); Object.assign(meta,await api.put(`/api/books/${meta.id}/cover`,blob,true)); }catch(e){ console.warn('cover',e); }
-      const m2=await api.put(`/api/books/${meta.id}/pages`,{pages});
-      Object.assign(meta,m2); if(Object.keys(patch).length) Object.assign(meta,await api.patch(`/api/books/${meta.id}`,patch));
-      try{ Object.assign(meta,await api.post(`/api/books/${meta.id}/parse`,{})); }catch(e){ console.warn('parse',e); }
-      if(useAi&&meta.hasText){ try{ Object.assign(meta,await api.post(`/api/books/${meta.id}/ai`,{})); }catch(e){ console.warn('ai',e); } }
-      LIB.books=[meta,...LIB.books.filter(x=>x.id!==meta.id)]; renderLib();
-      pdf.destroy();
-      toast(meta.hasText?`已匯入《${esc(meta.title)}》，共 ${meta.pages} 頁；背景會再解析版面（圖片、表格）${useAi?'、用 AI 填書名和分類':''}，可以先開始讀`:`已匯入《${esc(meta.title)}》，但這個 PDF 是掃描圖片、抽不出文字：只能看原始頁面`,meta.hasText?3000:6000);
-    }catch(e){ console.error(e); toast('匯入失敗：'+esc(e.message),6000); }
+      upd(await api.put(`/api/books/${meta.id}/pages`,{pages}));
+      delete IMPORTING[meta.id];
+      try{ upd(await api.post(`/api/books/${meta.id}/parse`,{})); }catch(e){ console.warn('parse',e); }
+      if(useAi&&meta.hasText){ try{ upd(await api.post(`/api/books/${meta.id}/ai`,{})); }catch(e){ console.warn('ai',e); } }
+      renderLib(); pdf.destroy();
+      toast(meta.hasText?`已匯入《${esc(meta.title)}》，共 ${meta.pages} 頁；背景會再解析版面（圖片、表格）${useAi?'、用 AI 填書名和分類':''}，可以先開始讀`:`已匯入《${esc(meta.title)}》，但這個 PDF 是掃描圖片、抽不出文字：只能看原始頁面`,6000);
+    }catch(e){ console.error(e); delete IMPORTING[meta.id]; refreshCard(meta.id); toast('匯入失敗：'+esc(e.message),6000); }
   }
 }
 $('fileIn').onchange=e=>{ importFiles(e.target.files); e.target.value=''; };
@@ -1030,6 +1054,7 @@ const TR={}, TR_ERR={};   // 翻譯中的頁、翻譯失敗的原因
 function stNorm(s){ s=s||{}; s.marks=s.marks||{}; s.notes=s.notes||{}; s.pageNotes=s.pageNotes||{}; s.paraNotes=s.paraNotes||{}; s.zh=s.zh||{}; return s; }
 const newId=()=>'n'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
 async function openBook(id){
+  { const b=LIB.books.find(x=>x.id===id); if(IMPORTING[id]||(b&&impLive(b))) return toast('這本書還在匯入（抽出每一頁的文字），好了就可以開始讀',3500); if(b&&impDead(b)) return toast('這本書匯入到一半被中斷了：到「詳細資料」刪除後重新匯入',5000); }
   try{ BOOK=await api.get(`/api/books/${id}`); }catch(e){ return toast('打不開：'+esc(e.message)); }
   ST=stNorm(BOOK.state); BOOK.pages=BOOK.pages||[]; PDF=null;
   const n=nPages(); PG=Math.min(BOOK.meta.lastPage||0,Math.max(0,n-1));

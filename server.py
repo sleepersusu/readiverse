@@ -1685,7 +1685,8 @@ class H(BaseHTTPRequestHandler):
             with open(os.path.join(d, 'book.pdf'), 'wb') as f: f.write(data)
             meta = {'id': bid, 'title': title, 'autoTitle': title, 'file': name, 'author': '', 'category': (qs.get('category') or [''])[0][:40], 'tags': [],
                     'status': 'unread', 'added': int(time.time() * 1000), 'opened': 0, 'pages': 0, 'lastPage': 0,
-                    'favorite': False, 'hasText': True, 'size': len(data), 'notes': 0, 'marks': 0, 'cover': False}
+                    'favorite': False, 'hasText': True, 'size': len(data), 'notes': 0, 'marks': 0, 'cover': False,
+                    'importing': int(time.time() * 1000)}          # 還在抽每一頁的文字；文字上傳好就拿掉
             with LOCK:
                 ix = load_index(); ix['books'].insert(0, meta); save_index(ix)
             return self.send(200, meta)
@@ -1728,7 +1729,7 @@ class H(BaseHTTPRequestHandler):
                 write_json(os.path.join(d, 'pages_raw.json'), pages)
                 pages = clean_pages(pages)
                 write_json(os.path.join(d, 'pages.json'), pages)
-                b = update_book(bid, pages=len(pages), hasText=sum(len(page_text(pg)) for pg in pages) > 40)
+                b = update_book(bid, pages=len(pages), hasText=sum(len(page_text(pg)) for pg in pages) > 40, importing=0)
                 return self.send(200, b)
             if sub == 'parse' and m == 'POST':       # 用 Docling 解析（匯入後自動叫；「詳細資料」可以重新解析）
                 if (b.get('parse') or {}).get('status') in ('running', 'queued') and not self.body_json().get('restart'): return self.send(200, b)

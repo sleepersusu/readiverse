@@ -1060,7 +1060,7 @@ function closeBook(){ flushSave(); clearTimeout(rdPollT); BOOK=null; ST=null; if
 $('back').onclick=closeBook; $('home').onclick=()=>{ if(BOOK) closeBook(); setFilter('home'); };
 function nPages(){ return Math.max(BOOK.pages.length,BOOK.meta.pages||0); }
 function showPage(p,dir){
-  const n=nPages(); if(!n) return; p=Math.max(0,Math.min(n-1,p|0)); const changed=p!==PG||dir===0; if(dir===undefined) dir=p>PG?1:p<PG?-1:0; PG=p;
+  const n=nPages(); if(!n) return; p=Math.max(0,Math.min(n-1,p|0)); if(dir===undefined) dir=p>PG?1:p<PG?-1:0; p=MODE==='text'?nearVis(p,dir||1):p; const changed=p!==PG||dir===0; PG=p;
   if(changed&&!SUB_END){ SUB=0; ANCHOR=null; }
   $('pgIn').value=p+1; $('prev').disabled=p<=0; $('next').disabled=p>=n-1;
   document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('on',b.dataset.mode===MODE));
@@ -1171,6 +1171,10 @@ const isDivider=P=>{ const T=P.filter(isTxt); return T.length>0&&T.length<=3&&P.
 // ---------- 雙頁閱讀：左邊第 N 頁、右邊第 N+1 頁（像打開的書）；視窗窄的時候一次一頁 ----------
 let BASE=0, TWO=false;
 const twoOK=()=>LS.get('spread',true)&&innerWidth>=1100&&innerWidth/Math.max(1,innerHeight)>=1.2;
+// 原書的空白頁（沒有文字也沒有圖）：直接跳過，不佔一頁
+const isBlank=p=>!!(BOOK&&BOOK.meta.hasText&&!((BOOK.pages[p]||[]).length));
+function visPages(){ const n=nPages(), L=[]; for(let i=0;i<n;i++) if(!isBlank(i)) L.push(i); return L.length?L:[0]; }
+function nearVis(p,dir){ const n=nPages(); if(!isBlank(p)) return p; for(let k=1;k<n;k++){ const a=p+k*(dir<0?-1:1), b=p-k*(dir<0?-1:1); if(a>=0&&a<n&&!isBlank(a)) return a; if(b>=0&&b<n&&!isBlank(b)) return b; } return p; }
 function withPg(p,fn){ const o=PG; PG=p; try{ return fn(); } finally{ PG=o; } }
 function pgOf(el){ const s=el&&el.closest&&el.closest('[data-side]'); return s?+s.dataset.side:PG; }
 function pageRows(){      // 這一頁（PG）的段落、圖表
@@ -1184,8 +1188,9 @@ function pageRows(){      // 這一頁（PG）的段落、圖表
     : `<div class="r2 rc" data-i="0"><div class="L"><div class="notext">這本 PDF 是掃描圖片，抽不出文字。<br><button type="button" class="small" style="margin-top:10px" data-mode-go="pdf">看原始頁面</button></div></div></div>`;
   return P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${/^• /.test(t)?' li':''}${DIV?(isLabel(t)?' dvl':' dvt'):''}${DIV&&i===0?' dv1':''}${!DIV&&isLabel(t)?' lbl':''}${kind[i].includes('hd')?' hd':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${PG}_${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div></div>`).join(''); }
 function renderPage(){
-  const sh=$('sheet'), n=nPages(); TWO=twoOK(); BASE=TWO?PG-(PG%2):PG; PG=BASE;
-  const sides=[BASE].concat(TWO&&BASE+1<n?[BASE+1]:[]);
+  const sh=$('sheet'), n=nPages(); TWO=twoOK(); PG=nearVis(PG,1);
+  const V=visPages(), pos=Math.max(0,V.indexOf(PG)), bp=TWO?pos-(pos%2):pos; BASE=V[bp]; PG=BASE;
+  const sides=[BASE].concat(TWO&&V[bp+1]!=null?[V[bp+1]]:[]);
   let h=`<div class="r2 rhead"><div class="L"><div class="ptop"><span class="runhead" title="${esc(BOOK.meta.title)}">${esc(String(BOOK.meta.title).split(/[:：]/)[0])}</span>${AIPG_ERR[PG]?`<span class="err" style="margin-left:8px">${esc(AIPG_ERR[PG])}</span>`:''}<span class="grow"></span>${pgNav(n,1)}</div></div></div>`;
   h+=`<div class="spread${TWO?' two':''}">${sides.map(p=>`<div class="side" data-side="${p}">${withPg(p,pageRows)}${TWO?`<div class="sfolio">${p+1}</div>`:''}</div>`).join('')}</div>`;
   h+=`<div class="r2 rf"><div class="L"><div class="rfoot">${pgNav(n)}</div></div></div>`;
@@ -1224,9 +1229,9 @@ function paginateTwo(sh,avail){
   if(over()) for(const k of [0.95,0.9,0.86,0.82,0.78,0.74,0.7,0.66]){ sh.style.setProperty('--fs',Math.max(12,FS*k)+'px'); if(!over()) break; }
   sides.forEach(sd=>{ if(hOf(sd)>avail-26){ sd.classList.add('over'); sd.style.height=(avail-6)+'px'; } else sd.style.height=''; });
   SUBG=[[...sh.querySelectorAll('.side>.rc')].map(r=>({r,off:0,h:r.offsetHeight}))]; SUBN=1; SUB=0; SUB_END=false;
-  const n=nPages(), last=sides.length?+sides[sides.length-1].dataset.side:PG;
-  sh.querySelectorAll('[data-turn="-1"]').forEach(b=>b.disabled=PG<=0); sh.querySelectorAll('[data-turn="1"]').forEach(b=>b.disabled=last>=n-1);
-  $('prev').disabled=PG<=0; $('next').disabled=last>=n-1;
+  const n=nPages(), last=sides.length?+sides[sides.length-1].dataset.side:PG, V=visPages(), first=PG<=V[0], end=last>=V[V.length-1];
+  sh.querySelectorAll('[data-turn="-1"]').forEach(b=>b.disabled=first); sh.querySelectorAll('[data-turn="1"]').forEach(b=>b.disabled=end);
+  $('prev').disabled=first; $('next').disabled=end;
   const fo=sh.querySelector('.folio'); if(fo) fo.innerHTML=`— ${PG+1}${last!==PG?'・'+(last+1):''} —<span class="pgpct">${Math.round((last+1)/Math.max(1,n)*100)}%</span>`;
   rs_scrollTop0(); if(BOOK) savePos(); }
 function rs_scrollTop0(){ const rs=$('rs'); rs.classList.remove('tall'); rs.scrollTop=0; }
@@ -1319,10 +1324,12 @@ $('rs').addEventListener('wheel',e=>{
 },{passive:false});
 function turn(d){
   if(!BOOK) return; hidePop(); if(typeof hideCard==='function') hideCard();
-  if(MODE==='text'&&TWO){ const n=nPages(), to=BASE+2*d; if(to<0||to>n-1) return; return showPage(to,d); }
+  if(MODE==='text'&&TWO){ const V=visPages(), pos=V.indexOf(BASE), to=V[pos+2*d]; if(to==null) return; return showPage(to,d); }
   if(MODE==='text'&&d>0&&SUB<SUBN-1){ SUB++; slide(1); return showSub(); }
   if(MODE==='text'&&d<0&&SUB>0){ SUB--; slide(-1); return showSub(); }
-  if(d<0&&PG>0){ SUB_END=MODE==='text'; showPage(PG-1); } else if(d>0) showPage(PG+1); }
+  const V=visPages(), pos=V.indexOf(PG), to=MODE==='text'?V[pos+d]:PG+d;
+  if(to==null||to<0||to>nPages()-1) return;
+  if(d<0){ SUB_END=MODE==='text'; showPage(to,-1); } else showPage(to,1); }
 function slide(d){ const sh=$('sheet'); sh.classList.remove('tn','tp'); void sh.offsetWidth; sh.classList.add(d>0?'tn':'tp'); }
 function rowOf(el){ return el&&el.closest('#sheet .rc'); }
 let rzT=null; addEventListener('resize',()=>{ clearTimeout(rzT); rzT=setTimeout(()=>{ if(BOOK&&MODE==='text'&&!$('vRead').hidden&&twoOK()!==TWO) renderPage(); else if(BOOK&&MODE==='text'&&!$('vRead').hidden) paginate(firstShown()); else if(BOOK&&MODE==='pdf') renderPdfPage(); },120); });

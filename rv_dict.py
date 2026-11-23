@@ -67,16 +67,58 @@ def local_dict():
     return _dict
 
 
+# 不規則變化：變化形 → 原形（字典裡很多變化形沒有自己的解釋，或是只有不常用的意思，例如 felt 毛氈、saw 鋸子）
+IRREG = dict(x.split(':') for x in (
+    'was:be were:be been:be am:be is:be are:be had:have has:have did:do done:do does:do made:make said:say went:go gone:go came:come '
+    'took:take taken:take gave:give given:give knew:know known:know found:find told:tell became:become began:begin begun:begin '
+    'brought:bring bought:buy caught:catch taught:teach held:hold kept:keep meant:mean met:meet paid:pay ran:run sat:sit sent:send '
+    'spent:spend stood:stand understood:understand wrote:write written:write spoke:speak spoken:speak broke:break broken:break '
+    'chose:choose chosen:choose drove:drive driven:drive ate:eat eaten:eat fell:fall fallen:fall forgot:forget forgotten:forget '
+    'got:get gotten:get grew:grow grown:grow hid:hide hidden:hide lain:lie led:lead lost:lose rose:rise risen:rise sang:sing sung:sing '
+    'shook:shake shaken:shake slept:sleep stole:steal stolen:steal struck:strike swam:swim threw:throw thrown:throw wore:wear worn:wear '
+    'won:win built:build heard:hear sold:sell fought:fight sought:seek dealt:deal drew:draw drawn:draw flew:fly flown:fly froze:freeze '
+    'frozen:freeze hung:hang laid:lay lent:lend rode:ride ridden:ride rang:ring rung:ring sank:sink shot:shoot shone:shine slid:slide '
+    'spun:spin stuck:stick stung:sting swore:swear sworn:swear swept:sweep tore:tear torn:tear woke:wake woken:wake wept:weep '
+    'felt:feel left:leave saw:see seen:see thought:think lay:lie fed:feed bled:bleed fled:flee bent:bend lit:light bit:bite bitten:bite '
+    'forgave:forgive forgiven:forgive arose:arise arisen:arise beaten:beat bore:bear borne:bear dug:dig hit:hit hurt:hurt let:let '
+    'quit:quit shut:shut spread:spread upset:upset withdrew:withdraw withdrawn:withdraw overcame:overcome undertook:undertake '
+    'better:good best:good worse:bad worst:bad more:many most:many less:little least:little further:far farther:far '
+    'children:child men:man women:woman feet:foot teeth:tooth geese:goose mice:mouse people:person lives:life wives:wife knives:knife '
+    'leaves:leaf halves:half selves:self shelves:shelf wolves:wolf criteria:criterion phenomena:phenomenon analyses:analysis '
+    'crises:crisis theses:thesis hypotheses:hypothesis data:datum media:medium').split())
+REF_RE = re.compile(r'([a-z]+)\s*的\s*(?:過去式|過去分詞|現在分詞|複數|比較級|最高階|第三人稱單數|-?ing\s*形式)')
+
+
+def _rule_bases(k, strong_only=False):
+    """規則變化的可能原形。回傳 [(原形, 是否很確定)]：重複子音（getting）、-ying（lying）、-ied（tried）很確定"""
+    c = []
+    if k.endswith('ying') and len(k) == 5: c.append((k[:-4] + 'ie', True))         # lying、dying、tying（只有這種短字）
+    if k.endswith('ing') and len(k) > 5:
+        b = k[:-3]
+        if len(b) > 2 and b[-1] == b[-2] and b[-1] not in 'lsz': c.append((b[:-1], True))
+        c += [(b + 'e', False), (b, False)]
+    if k.endswith('ied') and len(k) > 4: c.append((k[:-3] + 'y', True))
+    if k.endswith('ed') and len(k) > 4:
+        b = k[:-2]
+        if len(b) > 2 and b[-1] == b[-2] and b[-1] not in 'lsz': c.append((b[:-1], True))
+        c += [(k[:-1], False), (b, False)]
+    if k.endswith('ies') and len(k) > 4: c.append((k[:-3] + 'y', False))
+    if k.endswith('es') and len(k) > 3: c.append((k[:-2], False))
+    if k.endswith('s') and not k.endswith('ss') and len(k) > 3: c.append((k[:-1], False))
+    if k.endswith('iest') and len(k) > 5: c.append((k[:-4] + 'y', False))
+    if k.endswith('ier') and len(k) > 4: c.append((k[:-3] + 'y', False))
+    for suf in ('est', 'er'):
+        if k.endswith(suf) and len(k) > len(suf) + 2:
+            b = k[:-len(suf)]
+            if len(b) > 2 and b[-1] == b[-2]: c.append((b[:-1], False))
+            c += [(b + 'e', False), (b, False)]
+    if k.endswith("'s"): c.append((k[:-2], True))
+    return [x for x in c if not strong_only or x[1]]
+
+
 def candidates(k):
     INF = local_dict().get('inf', {})
-    c = [k, INF.get(k, '')]
-    if k.endswith('ies'): c.append(k[:-3] + 'y')
-    if k.endswith('es'): c.append(k[:-2])
-    if k.endswith('s') and not k.endswith('ss'): c.append(k[:-1])
-    if k.endswith('ied'): c.append(k[:-3] + 'y')
-    if k.endswith('ed'): c += [k[:-2], k[:-1]]
-    if k.endswith('ing'): c += [k[:-3], k[:-3] + 'e']
-    if k.endswith("'s"): c.append(k[:-2])
+    c = [k, IRREG.get(k, ''), INF.get(k, '')] + [b for b, _ in _rule_bases(k)]
     c += [x.replace('ise', 'ize') for x in list(c) if 'ise' in x]
     out = []
     for x in c:
@@ -84,10 +126,40 @@ def candidates(k):
     return out
 
 
+def _senses(e):
+    """解釋第一個詞性有幾個意思（看這個字自己的解釋夠不夠完整）"""
+    first = re.split(r'[；;]', e or '')[0]
+    return len([x for x in re.split(r'[,，]', first) if x.strip()])
+
+
+LOCAL_V = 2                      # 本機字典查法的版本：改了查法就加一，舊的快取會重查
+
+
 def local_lookup(k):
+    """本機字典。變化形（getting、went、felt）也給原形的意思：
+    - 這個字自己沒有解釋、或只寫「go的過去式」：直接給原形
+    - 動詞變化（-ing／-ed、不規則）：自己的解釋很少（getting 只有「採煤」）就原形放前面；自己的解釋很完整（meaning、feeling）就自己放前面
+    - 名詞複數、比較級（studies、happier）：自己有解釋就只用自己的"""
     D = local_dict().get('d', {})
-    for c in candidates(k):
-        if c in D: return D[c] if c == k else '（%s）%s' % (c, D[c])
+    own = D.get(k, '')
+    m = REF_RE.search(own or '')
+    base = IRREG.get(k) or (m.group(1) if m and m.group(1) != k else '')
+    verbish = bool(base) or k.endswith(('ing', 'ed'))
+    if not base:
+        for b, strong in _rule_bases(k):
+            if b == k or b not in D or len(b) < 3: continue
+            if k.endswith(('ing', 'ed')) and not strong and not re.search(r'\bv[ti]?\.', D[b]): continue   # -ing／-ed 的原形要是動詞
+            if own and not k.endswith(('ing', 'ed')): break                                              # 複數、比較級：自己的解釋就夠了
+            base = b; break
+    if base and base in D and base != k:
+        bm = D[base]
+        if not own or re.match(r'^\s*[a-z]+\s*的', own): return '（%s）%s' % (base, bm)                    # went → （go）…
+        if not verbish: return own
+        if _senses(own) >= 3 and k not in IRREG: return '%s ／ （%s）%s' % (own, base, bm)                 # meaning：自己的意思比較重要
+        return '（%s）%s ／ %s：%s' % (base, bm, k, own)                                                    # getting → （get）…
+    if own: return own
+    for c in candidates(k)[1:]:
+        if c in D: return '（%s）%s' % (c, D[c])
     return ''
 
 
@@ -224,7 +296,7 @@ def lookup(w):
         if en is not None:
             with LOCK:
                 cache = _read(CACHEF(), {}); c = cache.get(k) or c; c['en'] = en; cache[k] = c; _write(CACHEF(), cache)
-    if c and (c.get('src') in ('cambridge', 'ai') or (c.get('t') and time.time() - c.get('tried', 0) < 7 * 86400)): return c   # 沒查到的不記：下次再查
+    if c and (c.get('src') in ('cambridge', 'ai') or (c.get('t') and c.get('lv') == LOCAL_V and time.time() - c.get('tried', 0) < 7 * 86400)): return c   # 沒查到的不記；舊版本機字典的結果重查
     res, offline = None, False
     for cand in candidates(k)[:3]:
         r = cambridge(cand)
@@ -233,7 +305,7 @@ def lookup(w):
             res = {'t': r[0] if cand == k else '（%s）%s' % (cand, r[0]), 'src': 'cambridge', 'ex': r[2], 'hw': r[1]}; break
     if not res:
         t = local_lookup(k)
-        res = {'t': t, 'src': 'local' if t else 'none', 'tried': time.time()}
+        res = {'t': t, 'src': 'local' if t else 'none', 'tried': time.time(), 'lv': LOCAL_V}
         if offline: res['offline'] = True
     if not res.get('t') and len(k.split()) <= 5:                 # 字典都查不到：請 AI 解釋（記下來，下次直接用）
         try:

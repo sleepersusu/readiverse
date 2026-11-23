@@ -9,6 +9,40 @@
 """
 import json, re, os, sys, statistics
 
+
+_WORDS = None
+def _word(w):
+    """英文單字在不在字典裡（App 附的 ECDICT）。字典讀不到就回 None"""
+    global _WORDS
+    if _WORDS is None:
+        _WORDS = {}
+        here = os.path.dirname(os.path.abspath(__file__))
+        for f in (os.path.join(here, 'assets', 'dict.json.gz'), os.path.expanduser('~/.readiverse/字典.json')):
+            try:
+                if f.endswith('.gz'):
+                    import gzip
+                    with gzip.open(f, 'rt', encoding='utf-8') as fh: _WORDS = json.load(fh).get('d') or {}
+                else:
+                    with open(f, encoding='utf-8') as fh: _WORDS = json.load(fh).get('d') or {}
+                if _WORDS: break
+            except Exception: pass
+    if not _WORDS: return None
+    w = w.lower()
+    if w in _WORDS: return True
+    for suf, r in (('ies', 'y'), ('es', ''), ('s', ''), ('ied', 'y'), ('ed', ''), ('ed', 'e'), ('ing', ''), ('ing', 'e'), ('ly', '')):
+        if w.endswith(suf) and (w[:-len(suf)] + r) in _WORDS: return True
+    return False
+
+
+def hy_join(a, b):
+    """行尾有連字號的兩行接起來：peo- / ple → people；twenty- / four → twenty-four（本來就是複合字，連字號要留著）"""
+    m1 = re.search(r'([A-Za-z]+)-$', a); m2 = re.match(r'([A-Za-z]+)', b)
+    if m1 and m2:
+        x, y = m1.group(1), m2.group(1)
+        whole, left, right = _word(x + y), _word(x), _word(y)
+        if whole is not None and not whole and left and right: return a + b      # 接起來不是字、兩半都是字：複合字
+    return a[:-1] + b
+
 def is_scanned(pd):
     """抽樣幾頁：整頁幾乎都是一張圖 → 掃描書"""
     import pypdfium2.raw as R
@@ -176,7 +210,7 @@ def paras_from_lines(lines, W, H):
             if cur: out.append((cur, kind, y0))
             cur = s; kind = 'h' if is_head else 'p'; y0 = L['y']
         else:
-            cur = (cur[:-1] + s) if (cur.endswith('-') and s[:1].islower()) else cur + ' ' + s
+            cur = hy_join(cur, s) if (cur.endswith('-') and s[:1].islower()) else cur + ' ' + s
         prev = L
     if cur: out.append((cur, kind, y0))
     return out

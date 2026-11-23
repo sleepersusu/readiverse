@@ -1053,26 +1053,34 @@ async function loadPdf(){
   try{ const pdf=await pdfjsLib.getDocument(`/books/${id}/book.pdf`).promise; if(!BOOK||BOOK.meta.id!==id) return pdf.destroy(); PDF=pdf;
     if(MODE==='pdf') renderPdfPage();
     const ol=await pdf.getOutline(); if(ol&&ol.length&&await buildToc(ol)) return; textToc(); }catch(e){ console.warn('pdf',e); textToc(); } }
-function textToc(){
-  // 從內文找章節：章節頁、每頁開頭的 Part/Chapter/Section 標籤（後面接的標題一起顯示）
-  if(!BOOK) return; const out=[];
-  BOOK.pages.forEach((pg,i)=>{ const T=(pg||[]).filter(isTxt); if(!T.length) return;
-    const div=isDivider(pg), lab=isLabel(T[0]);
-    if(!div&&!lab) return;
-    let t=T[0].trim(); if(T[1]&&isHead(T[1])&&T[1].length<=70) t+=(lab?' — ':' ')+T[1].trim();
+function textToc(apply=true){
+  // 從內文找章節：章節頁、每頁開頭的 Part/Chapter 標籤、每頁開頭的短標題（後面接的副標題一起顯示）
+  if(!BOOK) return []; const out=[];
+  const tocPage=T=>T.filter(t=>/\s\d{1,3}$/.test(t.trim())).length>=Math.max(3,T.length*0.3);          // 目錄頁本身（很多行以頁碼結尾）
+  const headish=t=>{ t=t.trim(); return t.length>=3&&t.length<=60&&isHead(t)&&/[A-Za-z]{3}/.test(t)&&!/\d{3,}/.test(t)&&!/[.;,]$/.test(t)&&!/^(contents|this book is|copyright|isbn)/i.test(t); };
+  BOOK.pages.forEach((pg,i)=>{ const T=(pg||[]).filter(isTxt); if(!T.length||tocPage(T)) return;
+    const div=isDivider(pg), lab=isLabel(T[0]), hd=headish(T[0]);
+    if(!div&&!lab&&!hd) return;
+    let t=T[0].trim(); const sub=T[1]&&T[1].trim();
+    if(sub&&sub.length<=48&&isHead(sub)&&!/[.!?;,]$/.test(sub)) t+=' — '+sub;                                    // 副標題：We Talk About the World
     const d=/^(part|volume|book|act)\b/i.test(t)?0:1;
     const last=out[out.length-1]; if(last&&last.pg===i-1&&div&&!lab&&last.div){ last.t+=' — '+t; return; }   // Part 1 的下一頁是標題頁：接在一起
+    if(last&&last.t===t) return;
+    if(/[A-Za-z]\s+\d{1,3}\s+[A-Za-z]/.test(t)) return;                                                   // 中間夾著頁碼：是目錄頁的一行，不是章名
     out.push({t,d,pg:i,div}); });
-  if(out.length<2) return;
+  if(out.length<2) return [];
   const md=Math.min(...out.map(o=>o.d)); out.forEach(o=>o.d-=md);
-  $('toc').innerHTML=out.map(o=>`<button type="button" data-go="${o.pg}" style="padding-left:${8+o.d*14}px"><span class="pn">${o.pg+1}</span>${esc(o.t)}</button>`).join('');
-  $('tocBtn').hidden=false; }
+  if(apply){ $('toc').innerHTML=out.map(o=>`<button type="button" data-go="${o.pg}" style="padding-left:${8+o.d*14}px"><span class="pn">${o.pg+1}</span>${esc(o.t)}</button>`).join('');
+    $('tocBtn').hidden=false; }
+  return out; }
 async function buildToc(ol){
   const out=[]; const walk=async(items,d)=>{ for(const it of items){ let pg=null;
     try{ const dest=typeof it.dest==='string'?await PDF.getDestination(it.dest):it.dest; if(dest&&dest[0]) pg=await PDF.getPageIndex(dest[0]); }catch(e){}
     out.push({t:it.title,d,pg}); if(it.items&&it.items.length&&d<2) await walk(it.items,d+1); } };
   await walk(ol,0);
-  if(out.filter(o=>o.pg!=null).length<2) return false;     // 書籤壞掉（沒有頁碼）：改用內文的章節
+  const good=out.filter(o=>o.pg!=null).length;
+  if(good<2) return false;                                  // 書籤壞掉（沒有頁碼）：改用內文的章節
+  if(good<Math.max(5,textToc(false).length*0.5)) return false;   // 書籤太少（只有書名之類）：內文找到的章節比較完整
   $('toc').innerHTML=out.map(o=>`<button type="button" ${o.pg!=null?`data-go="${o.pg}"`:'disabled'} style="padding-left:${8+o.d*14}px">${o.pg!=null?`<span class="pn">${o.pg+1}</span>`:''}${esc(o.t)}</button>`).join('');
   $('tocBtn').hidden=false; return true; }
 $('tocBtn').onclick=e=>{ e.stopPropagation(); $('toc').hidden=!$('toc').hidden; };
@@ -1093,7 +1101,7 @@ function showPage(p,dir){
   if(changed){ $('rs').scrollTop=0; const sh=$('sheet'); sh.classList.remove('tn','tp'); if(dir){ void sh.offsetWidth; sh.classList.add(dir>0?'tn':'tp'); }
     savePos(); }
   if(!$('allPane').hidden) renderAll();
-  if(ZH&&MODE==='text'&&BOOK.meta.hasText) ensureZh(PG).then(()=>ensureZh(PG+1)).catch(()=>{});
+  zhVisible();
 }
 $('prev').onclick=()=>turn(-1); $('next').onclick=()=>turn(1);
 // 收起／打開工具列（記住你的選擇）；收起後畫面變高，重新排版
@@ -1202,7 +1210,7 @@ const twoOK=()=>LS.get('spread',true)&&innerWidth>=1100&&innerWidth/Math.max(1,i
 const isBlank=p=>!!(BOOK&&BOOK.meta.hasText&&!((BOOK.pages[p]||[]).length));
 function visPages(){ const n=nPages(), L=[]; for(let i=0;i<n;i++) if(!isBlank(i)) L.push(i); return L.length?L:[0]; }
 function nearVis(p,dir){ const n=nPages(); if(!isBlank(p)) return p; for(let k=1;k<n;k++){ const a=p+k*(dir<0?-1:1), b=p-k*(dir<0?-1:1); if(a>=0&&a<n&&!isBlank(a)) return a; if(b>=0&&b<n&&!isBlank(b)) return b; } return p; }
-function withPg(p,fn){ const o=PG; PG=p; try{ return fn(); } finally{ PG=o; } }
+function withPg(p,fn){ const o=PG; PG=p; try{ return fn(); } finally{ if(PG===p) PG=o; } }   // 裡面翻了頁（PG 被改掉）就不要改回去
 function pgOf(el){ const s=el&&el.closest&&el.closest('[data-side]'); return s?+s.dataset.side:PG; }
 function pageRows(){      // 這一頁（PG）的段落、圖表
   const P=paras(PG);
@@ -1245,6 +1253,7 @@ function paginateTwo(sh,avail){
   // 雙頁 = 兩欄：左欄放第 N 頁、右欄放第 N+1 頁。字太大放不下時，文字接著排到下一欄、下一個畫面（像電子書，不用上下捲）
   const sp=sh.querySelector('.spread.two'), sides=[...sh.querySelectorAll('.side')], gap=64;
   sp.style.height=Math.max(200,avail-4)+'px';
+  { const rs=$('rs'), over=rs.scrollHeight-rs.clientHeight; if(over>0) sp.style.height=Math.max(200,avail-4-over)+'px'; }   // 頁首頁尾比算的高一點：不要讓下面的 Next 被切掉
   const colW=()=>(sp.clientWidth-gap)/2;
   sides.forEach(sd=>{ const p=+sd.dataset.side, pw=PAGEW[p]||PAGEW0; if(!PAGEW[p]) pageWidth(p);
     const rows=[...sd.querySelectorAll(':scope>.rc')], onlyFig=rows.length&&rows.every(r=>r.querySelector('.fig'));
@@ -1403,6 +1412,7 @@ let NOTEEL=null;
 function noteClose(){ if(NOTEEL){ NOTEEL.remove(); NOTEEL=null; document.removeEventListener('mousedown',noteOut,true); } }
 function noteOut(e){ if(NOTEEL&&!NOTEEL.contains(e.target)&&!e.target.closest('.askbox')) noteClose(); }
 function noteBox(rect,text,quote,onSave,onDel,onAsk){ hidePop(); noteClose(); const d=document.createElement('div'); d.className='notebox'; NOTEEL=d;
+  const pg0=PG; { const S=onSave, D=onDel; onSave=S&&(v=>withPg(pg0,()=>S(v))); onDel=D&&(()=>withPg(pg0,()=>D())); }   // 雙頁：存檔時還是存到打開時的那一頁
   d.innerHTML=`<div class="askhead"><b>筆記</b><button type="button" class="ib ghost" data-nb="x" aria-label="關閉"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     ${quote?`<div class="askquote" lang="en">${esc(quote.length>200?quote.slice(0,200)+'…':quote)}</div>`:''}
     <textarea rows="4" maxlength="4000" placeholder="寫下你的筆記…">${esc(text||'')}</textarea>
@@ -1448,6 +1458,7 @@ function dragBox(d){ const bar=d.firstElementChild; bar.classList.add('dragbar')
     bar.addEventListener('pointermove',mv); bar.addEventListener('pointerup',up); });
   try{ new ResizeObserver(fit).observe(d); }catch(e){} }
 function askBox(rect,sel,ctx,onSave,init){ hidePop(); askClose(); const d=document.createElement('div'); d.className='askbox'; ASKEL=d;
+  const pg0=PG; { const S=onSave; onSave=S&&(t=>withPg(pg0,()=>S(t))); }   // AI 回答完才按「存成筆記」：要存到問的那一頁，不是現在的 PG
   const H=(init||[]).map(x=>({q:x.q,a:x.a})); let busy=false;
   const md=t=>esc(t).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>');
   const paint=()=>{ const lg=d.querySelector('.asklog'); lg.innerHTML=H.map(h=>`<div class="askq">${esc(h.q)}</div><div class="aska">${h.a==null?'<span class="note"><span class="spin"></span>AI 回答中…</span>':h.err?`<span class="err">${esc(h.err)}</span>`:md(h.a)}</div>`).join('');
@@ -1580,9 +1591,20 @@ async function ensureZh(p,force){
   if(!BOOK||p<0||p>=nPages()) return; const P=paras(p), idx=P.map((x,i)=>isTxt(x)?i:-1).filter(i=>i>=0); if(!idx.length||(ST.zh[p]&&!force)) return; if(TR[p]) return TR[p];
   if(TR_ERR[p]&&!force&&p!==PG) return;
   const id=BOOK.meta.id; delete TR_ERR[p];
-  TR[p]=api.post(`/api/books/${id}/translate`,{paras:idx.map(i=>P[i])}).then(j=>{ if(BOOK&&BOOK.meta.id===id){ const z=P.map(()=>''); idx.forEach((i,k)=>z[i]=j.zh[k]||''); ST.zh[p]=z; save(); } })
-    .catch(e=>{ TR_ERR[p]=e.message; throw e; }).finally(()=>{ delete TR[p]; if(BOOK&&BOOK.meta.id===id&&p===PG&&ZH&&MODE==='text'&&!(document.activeElement&&document.activeElement.closest('#sheet textarea'))) renderPage(); });
-  if(p===PG&&MODE==='text') renderPage(); return TR[p]; }
+  // 上一頁最後一段、下一頁第一段當上下文：跨頁切斷的句子才翻得通順
+  const lastTxt=q=>{ const A=q>=0&&q<nPages()?paras(q).filter(isTxt):[]; return A.length?A[A.length-1]:''; }, firstTxt=q=>{ const A=q>=0&&q<nPages()?paras(q).filter(isTxt):[]; return A.length?A[0]:''; };
+  const V=visPages(), vi=V.indexOf(p), before=vi>0?lastTxt(V[vi-1]):'', after=vi>=0&&vi<V.length-1?firstTxt(V[vi+1]):'';
+  const shown=()=>[...document.querySelectorAll('#sheet [data-side]')].some(s=>+s.dataset.side===p);
+  TR[p]=api.post(`/api/books/${id}/translate`,{paras:idx.map(i=>P[i]),before,after}).then(j=>{ if(BOOK&&BOOK.meta.id===id){ const z=P.map(()=>''); idx.forEach((i,k)=>z[i]=j.zh[k]||''); ST.zh[p]=z; save(); } })
+    .catch(e=>{ TR_ERR[p]=e.message; }).finally(()=>{ delete TR[p];
+      // 翻好的那一頁在畫面上（雙頁的右邊那頁也算）就重畫；正在改中文的話先不要打斷
+      if(BOOK&&BOOK.meta.id===id&&ZH&&MODE==='text'&&shown()&&!(document.activeElement&&document.activeElement.closest('#sheet textarea,#sheet [data-zh]'))) renderPage(); });
+  if(shown()&&MODE==='text') renderPage(); return TR[p]; }
+// 中文對照：畫面上的頁（雙頁就是兩頁）先翻，再預先翻下一個畫面
+function zhVisible(){ if(!ZH||MODE!=='text'||!BOOK||!BOOK.meta.hasText) return;
+  const V=visPages(), cur=[...document.querySelectorAll('#sheet [data-side]')].map(s=>+s.dataset.side), last=V.indexOf(cur[cur.length-1]);
+  const next=V.slice(last+1,last+1+Math.max(2,cur.length));                       // 預先翻後面兩頁：一般速度翻頁不用等
+  Promise.all(cur.map(q=>ensureZh(q))).then(()=>Promise.all(next.map(q=>ensureZh(q)))).catch(()=>{}); }
 
 /* ---------- 全書筆記（右側滑出） ---------- */
 $('allBtn').onclick=()=>{ $('allPane').hidden=!$('allPane').hidden; $('allBtn').classList.toggle('on',!$('allPane').hidden); if(!$('allPane').hidden) renderAll(); };

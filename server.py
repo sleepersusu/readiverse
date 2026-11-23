@@ -420,14 +420,47 @@ def ask_ai(j):
     return {'a': ai_text(prompt, kind='best')}
 
 
-def translate(paras):
-    numbered = '\n\n'.join('[%d] %s' % (i + 1, p) for i, p in enumerate(paras))
-    prompt = ('Translate each numbered English paragraph below into natural Traditional Chinese (台灣用語). '
-              'Keep names and numbers. Reply with ONLY a JSON array of strings, one per paragraph, same order, '
-              'exactly %d items, without the [n] numbers, no commentary.\n\n%s' % (len(paras), numbered))
-    arr = [re.sub(r'^\s*\[\d+\]\s*', '', str(x)) for x in ai_json(prompt, list)]
-    if len(arr) < len(paras): arr += [''] * (len(paras) - len(arr))
-    return arr[:len(paras)]
+# 只有簡體字才有的字：出現就代表 AI 翻成簡體了
+SIMP_RE = re.compile('[这们没说时会对过还发现问题实进动长开关门车东头给让认识师术学书报听个样经为脑话边]')
+
+
+def translate(paras, before='', after=''):
+    """每段翻成中文。用編號對應（不會因為 AI 少回一段就整頁錯位）；缺段就補問那幾段。
+    before／after：上一頁最後一段、下一頁第一段——跨頁被切斷的段落，翻出來才接得起來"""
+    # 人名、地名：保留英文（整本書一致，也對得上英文原文）。大寫開頭、又不是一般英文單字的，就是名字
+    D = (rv_dict.local_dict() or {}).get('d') or {}
+    names = []
+    for para in paras:
+        for n in re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*", para):
+            if all(w.lower() in D for w in n.split()) or n in names: continue
+            names.append(n)
+    keep = ('These names must stay EXACTLY in English letters, never transliterated into Chinese characters: %s. ' % ', '.join(names[:40])) if names else ''
+    def ask(idx):
+        numbered = '\n\n'.join('[%d] %s' % (i + 1, paras[i]) for i in idx)
+        ctx = ''
+        if before and 0 in idx: ctx += 'Context only (end of the previous page, do NOT translate): "%s"\n' % before[-400:]
+        if after and len(paras) - 1 in idx: ctx += 'Context only (start of the next page, do NOT translate): "%s"\n' % after[:400]
+        prompt = ('Translate each numbered English paragraph from a book into natural, fluent Traditional Chinese as used in Taiwan '
+                  '(繁體中文、台灣用語 — traditional characters only, NEVER simplified characters), '
+                  'faithful to the meaning and tone. Keep ALL personal names and place names in English letters (e.g. Morrie, not 莫瑞). ' + keep + 'A paragraph may begin or end in the middle of a sentence '
+                  '(the sentence continues on the previous/next page): translate just that fragment so it joins naturally, do not complete it. '
+                  'Translate headings as headings.\n' + ctx +
+                  'Reply with ONLY a JSON object mapping each number to its translation, e.g. {"1": "...", "2": "..."}. '
+                  'Include every number below.\n\n' + numbered)
+        j = ai_json(prompt, dict)
+        out = {}
+        for k, v in j.items():
+            m = re.match(r'\s*\[?(\d+)', str(k))
+            if m and isinstance(v, str) and v.strip(): out[int(m.group(1)) - 1] = re.sub(r'^\s*\[\d+\]\s*', '', v).strip()
+        return out
+    got = {}
+    for i0 in range(0, len(paras), 14):                                  # 段落很多的頁：分批
+        got.update(ask(list(range(i0, min(len(paras), i0 + 14)))))
+    miss = [i for i in range(len(paras)) if paras[i].strip() and (i not in got or SIMP_RE.search(got[i]))]
+    if miss: got.update(ask(miss))                                        # 漏掉的、翻成簡體字的段落再問一次
+    miss = [i for i in range(len(paras)) if i not in got and paras[i].strip()]
+    if miss and len(miss) * 3 > len(paras): raise RuntimeError('AI 翻譯不完整（%d 段沒翻到），再試一次' % len(miss))
+    return [got.get(i, '') for i in range(len(paras))]
 
 
 # ---------- 文字清理（程式碼，不用 AI）：頁首頁尾、OCR 雜訊、跨頁斷字、圖表旁的碎字 ----------
@@ -613,8 +646,10 @@ def clean_pages(pages, frozen=()):
         last, first = pages[p][a[-1]].strip(), pages[p + 1][b[0]].strip()
         if re.search(r'[.!?:;"”’)\]—–]$', last): continue
         if len(last.split()) < 8 and not re.match(r'[a-z(]', first): continue      # 上一頁最後是目錄、標題這種短行：不接
-        if re.search(r'[A-Za-z]-$', last) and re.match(r'[a-z]', first):          # ex- / pected
-            pages[p][a[-1]] = last[:-1] + first
+        if re.search(r'[A-Za-z]-$', last) and re.match(r'[a-z]', first):          # ex- / pected（twenty- / four 這種複合字留著連字號）
+            x, y = re.search(r'([A-Za-z]+)-$', last).group(1), re.match(r'([A-Za-z]+)', first).group(1)
+            keep = not _known(x + y) and _known(x) and _known(y)
+            pages[p][a[-1]] = (last if keep else last[:-1]) + first
         elif re.match(r'[a-z(]', first) or (len(last) > 60 and re.search(r'[a-z,]$', last)):
             pages[p][a[-1]] = last + ' ' + first
         else: continue
@@ -1747,7 +1782,7 @@ class H(BaseHTTPRequestHandler):
             if sub == 'translate' and m == 'POST':
                 j = self.body_json(); paras = [str(x) for x in (j.get('paras') or []) if isinstance(x, str)]
                 if not paras: return self.err(400, '這一頁沒有文字')
-                try: zh = translate(paras)
+                try: zh = translate(paras, str(j.get('before') or '')[:600], str(j.get('after') or '')[:600])
                 except RuntimeError as e: return self.err(502, str(e).replace('AI 失敗', '翻譯失敗'))
                 return self.send(200, {'zh': zh})
         return self.err(404, 'not found')

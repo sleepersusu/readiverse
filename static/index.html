@@ -453,7 +453,8 @@ dialog.setdlg form{display:flex;flex-direction:column;max-height:min(86vh,860px)
 .vw.last,.ph.last{position:relative;margin-right:.12em}
 /* ---------- 章節頁、章節標籤 ---------- */
 .para.dv1{margin-top:min(22vh,190px)!important}
-.para.dvl,.para.dvt{max-width:none;text-align:center;margin-left:auto;margin-right:auto}
+.para.dvl,.para.dvt,.para.dvs{max-width:none;text-align:center;margin-left:auto;margin-right:auto}
+.para.dvs .ptx{text-indent:0!important;text-align:center;font-size:calc(var(--fs)*1.1);margin-top:.4em}
 .para.dvl .ptx,.para.dvt .ptx{text-indent:0!important;text-align:center}
 .para.dvl .ptx{text-transform:uppercase;letter-spacing:.32em;font-size:calc(var(--fs)*1.25);font-weight:500;color:var(--pink);margin-bottom:.5em}
 .para.dvt .ptx{font-size:calc(var(--fs)*2.1);line-height:1.2;font-weight:500;letter-spacing:.01em}
@@ -1167,7 +1168,7 @@ const NUMW='one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|first
 const LABEL_RE=new RegExp(`^(part|chapter|section|volume|book|unit|lesson|act|appendix)\\s+([0-9]+|[ivxlcdm]+|[a-z]|${NUMW})\\.?$`,'i');
 const isLabel=t=>typeof t==='string'&&LABEL_RE.test(t.trim());
 // 整頁只有一兩行標題（像 Part 1 的扉頁）：當成「章節頁」，置中放大
-const isDivider=P=>{ const T=P.filter(isTxt); return T.length>0&&T.length<=3&&P.length===T.length&&T.every(t=>isLabel(t)||isHead(t))&&T.join(' ').length<=90; };
+const isDivider=P=>{ const T=P.filter(isTxt); return T.length>0&&T.length<=5&&P.length===T.length&&T.every(t=>t.trim().length<=60&&!/[.!?]["”’)]?$/.test(t.trim()))&&T.join(' ').length<=160; };   // 只有幾行短字的頁（扉頁、章節頁）：整頁置中
 // ---------- 雙頁閱讀：左邊第 N 頁、右邊第 N+1 頁（像打開的書）；視窗窄的時候一次一頁 ----------
 let BASE=0, TWO=false;
 const twoOK=()=>LS.get('spread',true)&&innerWidth>=1100&&innerWidth/Math.max(1,innerHeight)>=1.2;
@@ -1186,7 +1187,7 @@ function pageRows(){      // 這一頁（PG）的段落、圖表
   if(!P.length) return BOOK.meta.hasText
     ? `<div class="r2 rc blankpg" data-i="0"><div class="L"><button type="button" class="linkbtn" data-mode-go="pdf" title="這一頁沒有文字（原書的空白頁或整頁圖）">看原始頁面</button></div></div>`      // 原書的空白頁：就是空白的一頁
     : `<div class="r2 rc" data-i="0"><div class="L"><div class="notext">這本 PDF 是掃描圖片，抽不出文字。<br><button type="button" class="small" style="margin-top:10px" data-mode-go="pdf">看原始頁面</button></div></div></div>`;
-  return P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${/^• /.test(t)?' li':''}${DIV?(isLabel(t)?' dvl':' dvt'):''}${DIV&&i===0?' dv1':''}${!DIV&&isLabel(t)?' lbl':''}${kind[i].includes('hd')?' hd':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${PG}_${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div></div>`).join(''); }
+  return P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${/^• /.test(t)?' li':''}${DIV?(isLabel(t)?' dvl':i===P.findIndex(x=>isTxt(x)&&!isLabel(x))?' dvt':' dvs'):''}${DIV&&i===0?' dv1':''}${!DIV&&isLabel(t)?' lbl':''}${kind[i].includes('hd')?' hd':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${PG}_${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div></div>`).join(''); }
 function renderPage(){
   const sh=$('sheet'), n=nPages(); TWO=twoOK(); PG=nearVis(PG,1);
   const V=visPages(), pos=Math.max(0,V.indexOf(PG)), bp=TWO?pos-(pos%2):pos; BASE=V[bp]; PG=BASE;

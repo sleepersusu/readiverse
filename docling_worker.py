@@ -190,6 +190,14 @@ def line_page(pg, figs, skip_txt=(), list_items=()):
             if t - 2 <= L['y'] <= b + 2 and L['x0'] >= l - 6 and L['x1'] <= r + 6: return True
         return False
     lines = [L for L in lines if not inside(L)]
+    # 頁尾：頁面最底下、字比內文小、跟上面的內文隔一段距離的幾行（出版社版權、DOI）
+    if len(lines) > 4:
+        hs = sorted(L['h'] for L in lines); mh = hs[len(hs) // 2]
+        ys = [L['y'] for L in lines]; gaps = sorted(b - a for a, b in zip(ys, ys[1:]) if b - a > 3); g = gaps[len(gaps) // 5] if gaps else 14
+        k = len(lines)
+        while k > 1 and lines[k - 1]['h'] < 0.9 * mh and lines[k - 1]['y'] > H * 0.8: k -= 1
+        tail = ' '.join(L['s'] for L in lines[k:])
+        if k < len(lines) and lines[k]['y'] - lines[k - 1]['y'] > g * 1.3 and re.search(r'©|\bDOI\b|\bPress\b|https?://|www\.', tail): lines = lines[:k]   # 只拿掉出版資訊（註腳是內容，留著）
     # 頁碼（只有數字）不要
     lines = [L for L in lines if not re.fullmatch(r'[\divxlcdm]{1,6}', L['s'].lower())]
     paras = paras_from_lines(lines, W, H) if lines else []

@@ -553,6 +553,9 @@ mark.hl.c0{background:none;padding:0}
 mark.hl.noted{text-decoration:underline dashed;text-decoration-color:color-mix(in srgb,var(--ink) 55%,transparent);text-underline-offset:4px;text-decoration-thickness:1.5px}
 .notebox{position:fixed;z-index:60;width:min(370px,calc(100vw - 16px));display:flex;flex-direction:column;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.18);padding:10px 12px 12px}
 .notebox textarea{width:100%;resize:vertical;font-size:14px}
+.blankpg{display:flex;align-items:flex-end;justify-content:center;min-height:40vh}
+.blankpg .linkbtn{border:0;background:none;color:var(--pmuted);font-size:12px;text-decoration:underline;text-underline-offset:3px;opacity:.6;cursor:pointer;min-height:0;padding:4px}
+.blankpg .linkbtn:hover{opacity:1}
 </style></head>
 <body>
 <div id="boot" class="boot" role="status" aria-live="polite"><div class="bootin"><div class="bootlogo"><span class="d"></span>Readiverse</div>
@@ -1176,7 +1179,9 @@ function pageRows(){      // 這一頁（PG）的段落、圖表
   const kind=P.map((t,i)=>{ if(!isTxt(t)) return ''; if(isHead(t)||subHead(t,i)) return 'hd'; const pv=P[i-1];
     if(i===0) return 'noind'; if(!isTxt(pv)) return 'noind'; if(isHead(pv)||subHead(pv,i-1)) return (isHead(pv)&&t.length>180&&/^[A-Z]/.test(t)?'cap ':'')+'noind'; return ''; });
   const DIV=isDivider(P);
-  if(!P.length) return `<div class="r2 rc" data-i="0"><div class="L"><div class="notext">${BOOK.meta.hasText?'這一頁沒有文字（可能是圖片或空白頁）。':'這本 PDF 是掃描圖片，抽不出文字。'}<br><button type="button" class="small" style="margin-top:10px" data-mode-go="pdf">看原始頁面</button></div></div></div>`;
+  if(!P.length) return BOOK.meta.hasText
+    ? `<div class="r2 rc blankpg" data-i="0"><div class="L"><button type="button" class="linkbtn" data-mode-go="pdf" title="這一頁沒有文字（原書的空白頁或整頁圖）">看原始頁面</button></div></div>`      // 原書的空白頁：就是空白的一頁
+    : `<div class="r2 rc" data-i="0"><div class="L"><div class="notext">這本 PDF 是掃描圖片，抽不出文字。<br><button type="button" class="small" style="margin-top:10px" data-mode-go="pdf">看原始頁面</button></div></div></div>`;
   return P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${/^• /.test(t)?' li':''}${DIV?(isLabel(t)?' dvl':' dvt'):''}${DIV&&i===0?' dv1':''}${!DIV&&isLabel(t)?' lbl':''}${kind[i].includes('hd')?' hd':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${PG}_${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div></div>`).join(''); }
 function renderPage(){
   const sh=$('sheet'), n=nPages(); TWO=twoOK(); BASE=TWO?PG-(PG%2):PG; PG=BASE;

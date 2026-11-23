@@ -467,6 +467,29 @@ SUPS = str.maketrans('0123456789,', '⁰¹²³⁴⁵⁶⁷⁸⁹˒')
 NOT_FN = re.compile(r'\b(?:no|nos|vol|vols|p|pp|fig|figs|ch|chap|chapter|part|table|sec|section|ed|op|art|para|v|vs|ver|step|unit|test|question|page|level|grade|room|act|scene)\.?\s?$', re.I)   # 這些字後面的數字不是註腳
 
 
+def _is_word(w):
+    """一般英文字（字典裡有、而且不是只有縮寫、專有名詞）"""
+    v = (rv_dict.local_dict().get('d') or {}).get(w.lower())
+    return bool(v) and not re.match(r'^\s*(abbr\.|\[|\()', str(v))
+
+
+def fix_spaced_caps(x):
+    """標題字母之間加寬了字距，抽出來變成「DO ING HARD TH INGS」「PART I I I」：合回「DOING HARD THINGS」「PART III」"""
+    if len(x) > 90: return x
+    L = [c for c in x if c.isalpha()]
+    if not L or sum(c.isupper() for c in L) < 0.7 * len(L): return x
+    x = re.sub(r'\b([IVX])((?: [IVX])+)\b', lambda m: m.group(1) + m.group(2).replace(' ', ''), x)    # 羅馬數字 I I I → III
+    toks = x.split(' '); changed = True
+    while changed:
+        changed = False
+        for k in range(len(toks) - 1):
+            a, b = toks[k], toks[k + 1]
+            if not (a.isalpha() and b.isalpha()): continue
+            if (not _is_word(a) or not _is_word(b)) and _is_word(a + b):
+                toks[k:k + 2] = [a + b]; changed = True; break
+    return ' '.join(toks)
+
+
 def clean_pages(pages, frozen=()):
     """回傳清理過的 pages；frozen 裡的頁不動"""
     pages = [list(pg) for pg in pages]; n = len(pages); frozen = set(frozen)
@@ -480,6 +503,7 @@ def clean_pages(pages, frozen=()):
                 toks = x.split()
                 while toks and _noise_tok(toks[0]): toks.pop(0)
                 x = ' '.join(toks)
+                x = fix_spaced_caps(x)
                 x = re.sub(r'^[•·*«»~&§¶|]+\s*(?=[a-z,.;:]|$)', '', x)        # 花紋被辨識成「•」「*」「«」（後面接小寫才是雜訊；「• System 1…」是真的條列）
                 x = re.sub(r'^[·*«»~&§¶|]+\s*', '', x)
                 x = re.sub(r'^[,.;:]+\s+', '', x)                            # 段落開頭多出來的標點

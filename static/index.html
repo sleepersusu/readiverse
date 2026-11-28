@@ -127,6 +127,10 @@ textarea{width:100%;line-height:1.6;border:1px solid var(--line);border-radius:8
 .pc .po img{position:relative;z-index:1;width:100%;height:100%;object-fit:cover;display:block}
 .pc .fav,.pc .pb,.pc .ov{z-index:2}
 .dcv{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:16px 14px 18px;text-align:left;color:#fff;background:linear-gradient(165deg,hsl(var(--hu) 48% 46%),hsl(calc(var(--hu) + 28) 52% 26%));overflow:hidden;container-type:inline-size}
+.logbox{max-height:220px;overflow:auto;background:var(--soft);border-radius:8px;padding:8px 10px;font:11.5px/1.5 var(--f-mono);white-space:pre-wrap;margin:0 0 14px}
+.dcv img.illus{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;max-width:none!important;object-fit:cover;z-index:0!important;margin:0!important;border-radius:0!important;box-shadow:none!important}
+.dcv.ill::before{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(180deg,rgba(0,0,0,.55) 0%,rgba(0,0,0,.25) 45%,rgba(0,0,0,0) 65%,rgba(0,0,0,.45) 100%)}
+.dcv.ill>span{position:relative;z-index:2;text-shadow:0 1px 3px rgba(0,0,0,.45)}
 .dcv::after{content:"";position:absolute;left:14px;right:14px;top:34px;height:1px;background:rgba(255,255,255,.35)}
 .dcv .pk{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;opacity:.75;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dcv .pt{margin-top:14px;font-family:var(--f-read);font-weight:600;font-size:clamp(14px,13cqi,30px);line-height:1.15;letter-spacing:-.01em;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden;text-wrap:balance}
@@ -757,12 +761,13 @@ const byOpened=(a,b)=>(b.opened||b.added)-(a.opened||a.added);
 const SORTS={opened:byOpened,added:(a,b)=>b.added-a.added,title:(a,b)=>a.title.localeCompare(b.title,'zh-Hant'),progress:(a,b)=>prog(b)-prog(a)};
 function inFilter(b,f){ return f==='fav'?b.favorite:f==='reading'?b.status==='reading':f==='done'?b.status==='done':f==='none'?!b.category:f.startsWith('c:')?b.category===f.slice(2):true; }
 function filterName(f){ return f==='all'?'全部書籍':f==='fav'?'我的最愛':f==='reading'?'閱讀中':f==='done'?'已完成':f==='none'?'未分類':f.slice(2); }
-const coverUrl=b=>`/books/${b.id}/cover.jpg?v=${b.coverV||b.added}`;
+const coverUrl=b=>`/books/${b.id}/cover.${b.coverFmt==='svg'?'svg':'jpg'}?v=${b.coverV||b.added}`;
 const hasCover=b=>b.cover!==false;
 function hueOf(t){ let h=0; for(const c of String(t)) h=(h*31+c.codePointAt(0))>>>0; return h%360; }
 // 設計好的封面：沒有真正封面的書（第一頁是滿滿文字）用書名＋作者
-function designCover(b){ return `<div class="dcv" style="--hu:${hueOf(b.title)}"><span class="pk">${esc(b.category||'Readiverse')}</span><span class="pt">${esc(b.title)}</span>${b.author?`<span class="pa">${esc(b.author)}</span>`:''}</div>`; }
-const coverImg=(b,lazy)=>hasCover(b)?`<img src="${coverUrl(b)}" alt="" ${lazy?'loading="lazy" ':''}onerror="this.remove()">`:'';
+function designCover(b){ const ill=hasCover(b)&&b.coverFmt==='svg';      // AI 插畫：當背景，書名作者照樣印在上面
+  return `<div class="dcv${ill?' ill':''}" style="--hu:${hueOf(b.title)}">${ill?`<img class="illus" src="${coverUrl(b)}" alt="" onerror="this.remove()">`:''}<span class="pk">${esc(b.category||'Readiverse')}</span><span class="pt">${esc(b.title)}</span>${b.author?`<span class="pa">${esc(b.author)}</span>`:''}</div>`; }
+const coverImg=(b,lazy)=>hasCover(b)&&b.coverFmt!=='svg'?`<img src="${coverUrl(b)}" alt="" ${lazy?'loading="lazy" ':''}onerror="this.remove()">`:'';
 const IC={play:'<svg class="i" viewBox="0 0 24 24" style="fill:currentColor;stroke:none"><path d="M7 4.5v15l13-7.5z"/></svg>',
   more:'<svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>',
   star:'<svg class="i" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg>',
@@ -970,14 +975,17 @@ function editBook(id){
       <div class="fld" style="flex:1;margin:0"><span class="label">封面</span>
         <label class="filebtn small">上傳圖片<input type="file" id="eCvF" accept="image/*"></label>
         <span class="row" style="gap:4px"><button type="button" class="small" id="eCvP">用 PDF 第</button><input type="number" id="eCvN" min="1" max="${b.pages||1}" value="1" aria-label="頁碼" style="width:58px;min-height:28px;padding:2px 6px;font-size:12px"><span class="note">頁</span></span>
-        <button type="button" class="small" id="eCvD"${hasCover(b)?'':' disabled'}>用書名封面</button></div></div>
+        <button type="button" class="small" id="eCvD"${hasCover(b)?'':' disabled'}>用書名封面</button>
+        <button type="button" class="small" id="eCvA" title="找 PDF 裡的照片；書的話再到網路上找出版的書封；都沒有就請 AI 依主題畫插畫">自動找封面</button>
+        <button type="button" class="small" id="eCvI" title="請 AI 依這本書的主題畫一張插畫（書名、作者印在上面）">AI 插畫</button></div></div>
     <div class="fld"><label class="label" for="eT">書名</label><input type="text" id="eT" value="${esc(b.title)}" required></div>
     <div class="fld"><label class="label" for="eA">作者</label><input type="text" id="eA" value="${esc(b.author)}"></div>
     <div class="row" style="gap:10px"><div class="fld grow"><label class="label" for="eC">分類</label><select id="eC"><option value="">未分類</option>${LIB.categories.map(c=>`<option${c===b.category?' selected':''}>${esc(c)}</option>`).join('')}</select></div>
     <div class="fld grow"><label class="label" for="eS">狀態</label><select id="eS">${Object.entries(STATUS).map(([k,v])=>`<option value="${k}"${k===b.status?' selected':''}>${v}</option>`).join('')}</select></div></div>
     <div class="fld"><label class="label" for="eG">標籤（用逗號分開）</label><input type="text" id="eG" value="${esc((b.tags||[]).join(', '))}"></div>
     <label class="row" style="margin-bottom:12px;font-size:14px"><input type="checkbox" id="eF"${b.favorite?' checked':''}> 加到最愛 ★</label>
-    <div class="row" style="margin-bottom:16px;gap:6px"><button type="button" class="small" id="eParse"${busy(b)?' disabled':''} title="重新解析整本書的版面（畫過螢光筆、寫過筆記、翻譯過的頁不會動）">重新解析版面</button><button type="button" class="small" id="eProof"${busy(b)?' disabled':''} title="Claude 逐頁對照原書，修正漏字、錯字、標點">AI 校對整本</button>${b.hasText?`<button type="button" class="small" id="eAi"${busy(b)?' disabled':''} title="用 AI 重新判斷書名、作者、分類、標籤、封面（你改過的欄位不會被蓋掉）">AI 重新判斷資料</button>`:''}${aiTag(b)}</div>
+    <div class="row" style="margin-bottom:16px;gap:6px"><button type="button" class="small ghost" id="eLog" title="這本書的處理紀錄：解析、AI、校對、封面，失敗的原因也在這裡">處理紀錄</button><button type="button" class="small" id="eParse"${busy(b)?' disabled':''} title="重新解析整本書的版面（畫過螢光筆、寫過筆記、翻譯過的頁不會動）">重新解析版面</button><button type="button" class="small" id="eProof"${busy(b)?' disabled':''} title="Claude 逐頁對照原書，修正漏字、錯字、標點">AI 校對整本</button>${b.hasText?`<button type="button" class="small" id="eAi"${busy(b)?' disabled':''} title="用 AI 重新判斷書名、作者、分類、標籤、封面（你改過的欄位不會被蓋掉）">AI 重新判斷資料</button>`:''}${aiTag(b)}</div>
+    <pre id="eLogBox" class="logbox" hidden></pre>
     <div class="row" style="justify-content:space-between"><button type="button" class="danger" id="eDel">刪除這本書</button><span class="row"><button type="button" id="eNo">取消</button><button class="primary" value="ok">儲存</button></span></div></form>`;
   d.showModal(); $('eNo').onclick=()=>d.close();
   const setCv=async(req)=>{ try{ toast('<span class="spin"></span>更新封面…',0); Object.assign(b,await req); $('eCv').innerHTML=designCover(b)+coverImg(b); $('eCvD').disabled=!hasCover(b); renderLib(true); toast('封面已更新'); }catch(e){ toast('封面更新失敗：'+esc(e.message),5000); } };
@@ -987,6 +995,10 @@ function editBook(id){
   $('eCvP').onclick=()=>setCv((async()=>{ const pdf=await pdfjsLib.getDocument(`/books/${id}/book.pdf`).promise; try{ const n=Math.max(1,Math.min(pdf.numPages,$('eCvN').value|0)), pg=await pdf.getPage(n), v0=pg.getViewport({scale:1}), vp=pg.getViewport({scale:480/v0.width});
     const c=document.createElement('canvas'); c.width=vp.width; c.height=vp.height; await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise; const bl=await new Promise(r=>c.toBlob(r,'image/jpeg',.84)); return api.put(`/api/books/${id}/cover?user=1`,bl,true); } finally{ pdf.destroy(); } })());
   $('eCvD').onclick=()=>setCv(api.del(`/api/books/${id}/cover`));
+  $('eCvA').onclick=()=>setCv(api.post(`/api/books/${id}/cover-auto`,{}));
+  $('eCvI').onclick=()=>setCv(api.post(`/api/books/${id}/cover-auto`,{ai:true}));
+  if($('eLog')) $('eLog').onclick=async()=>{ const box=$('eLogBox'); if(!box.hidden){ box.hidden=true; return; } box.hidden=false; box.textContent='讀取中…';
+    try{ const j=await api.get(`/api/books/${id}/log`); box.textContent=(j.lines||[]).slice().reverse().join('\n')||'還沒有紀錄'; }catch(e){ box.textContent='讀不到紀錄：'+e.message; } };
   if($('eAi')) $('eAi').onclick=async()=>{ try{ Object.assign(b,await api.post(`/api/books/${id}/ai`,{})); d.close(); renderLib(true); toast('AI 開始判斷《'+esc(b.title)+'》的資料'); }catch(e){ toast(esc(e.message),5000); } };
   $('eProof').onclick=async()=>{ try{ Object.assign(b,await api.post(`/api/books/${id}/proof`,{restart:true})); d.close(); renderLib(true); toast('開始 AI 校對《'+esc(b.title)+'》'); }catch(e){ toast(esc(e.message),5000); } };
   $('eParse').onclick=async()=>{ try{ Object.assign(b,await api.post(`/api/books/${id}/parse`,{restart:true})); d.close(); renderLib(true); toast('開始重新解析《'+esc(b.title)+'》'); }catch(e){ toast(esc(e.message),5000); } };

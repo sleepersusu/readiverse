@@ -933,8 +933,8 @@ def render_pages(bid, nums):
         for k in range(0, len(todo), 50):
             r = subprocess.run([VPY, '-c', code, os.path.join(LIB, bid, 'book.pdf'), out] + [str(n) for n in todo[k:k + 50]],
                                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=600, env=CHILD_ENV)
-            if r.returncode != 0: RENDER_ERR[bid] = ((r.stderr or r.stdout or '').strip().splitlines() or ['畫頁面圖失敗'])[-1][:200]
-    elif todo: RENDER_ERR[bid] = '找不到 Docling 的 Python 環境（%s）' % VPY
+            if r.returncode != 0: RENDER_ERR[bid] = ((r.stderr or r.stdout or '').strip().splitlines() or ['畫頁面圖失敗'])[-1][:200]; blog(bid, '畫頁面圖失敗：' + ' | '.join((r.stderr or r.stdout or '').strip().splitlines()[-6:]))
+    elif todo: RENDER_ERR[bid] = '找不到 Docling 的 Python 環境（%s）' % VPY; blog(bid, RENDER_ERR[bid])
     return out
 
 
@@ -1071,6 +1071,92 @@ def drop_ads(pages, pno, j, frozen):
     return removed
 
 
+# ---------- 圖表救援：圖表、表格的數字被抽成一行一行的文字（「$0 4,979」「$25,000 48,829」）→ AI 看頁面圖，換回圖表截圖／真正的表格 ----------
+_NUMTOK = re.compile(r'^[(\[]?[$€£¥]?[-+]?\d[\d,.]*[%kKmMbB]?[)\]]?[.,;:]?$')
+def data_runs(pg):
+    """這一頁裡「像圖表數字」的段落：連續 3 段以上、每段很短、大部分是數字。回傳 [(第一段, 最後一段)]（文字段落的序號）"""
+    T = [x for x in pg if is_text(x)]
+    def numish(t):
+        w = t.split()
+        if not w or len(t) > 90: return False
+        if re.match(r'^\d{1,3}\.\s+[A-Za-z]', t): return False                              # 註解「10. Ibid.」：不是圖表
+        k = sum(1 for x in w if _NUMTOK.match(x))
+        return k >= 1 and k / len(w) >= 0.45
+    runs, st = [], None
+    for i, t in enumerate(T + ['.' * 200]):
+        if i < len(T) and numish(t):
+            if st is None: st = i
+        else:
+            if st is not None and i - st >= 3: runs.append((st, i - 1))
+            st = None
+    return runs
+
+
+RESCUE_PROMPT = ("Read the image file %s. It is one page of a document (a book, news article or research paper).\n"
+    "Below are the text paragraphs we extracted from this page (keyed by index). Some of them are NOT prose: they are the data of a chart "
+    "or table that got flattened into lines of numbers (axis labels, bar values, table cells), so they are unreadable and may be misaligned.\n"
+    "Find every chart / graph / table on the page that this flattened data comes from. For each one reply with:\n"
+    " kind: \"chart\" or \"table\"; paras: the paragraph indexes that are its flattened data, title, labels or legend (never body prose); "
+    "title: its title if printed; bbox: [x0, y0, x1, y1] as fractions (0-1) of the page width/height covering the whole chart or table "
+    "including its title, axes and source line; rows (tables only): the table exactly as printed, first row = header, every value copied exactly.\n"
+    "Reply with ONLY JSON: {\"blocks\":[{\"kind\":\"chart\",\"paras\":[3,4,5],\"title\":\"...\",\"bbox\":[0.1,0.2,0.9,0.6]}]}\n\n%s")
+
+
+def _crop(img, bbox, out):
+    """從頁面圖裁出圖表（bbox 是 0-1 的比例），存成 PNG；回傳 (寬, 高)"""
+    code = ('import sys,json\nfrom PIL import Image\nim=Image.open(sys.argv[1]);W,H=im.size;b=json.loads(sys.argv[2])\n'
+            'x0,y0,x1,y1=[max(0,min(1,float(v))) for v in b];pad=0.004\n'
+            'box=(int(max(0,x0-pad)*W),int(max(0,y0-pad)*H),int(min(1,x1+pad)*W),int(min(1,y1+pad)*H))\n'
+            'c=im.crop(box);c.save(sys.argv[3]);print(json.dumps(c.size))')
+    r = subprocess.run([VPY, '-c', code, img, json.dumps(bbox), out], capture_output=True, text=True, timeout=60, env=CHILD_ENV)
+    try: return tuple(json.loads(r.stdout.strip().splitlines()[-1]))
+    except Exception: return None
+
+
+def rescue_page(bid, pno, imgdir):
+    """一頁的圖表救援。回傳紀錄 {'blocks': n}"""
+    d = os.path.join(LIB, bid)
+    with LOCK: pages = read_json(os.path.join(d, 'pages.json')) or []
+    if pno >= len(pages): return None
+    T = [x for x in pages[pno] if is_text(x)]
+    img = os.path.join(imgdir, 'p%d.jpg' % (pno + 1))
+    if not os.path.exists(img): return {'ok': False, 'error': '沒有頁面圖', 'noimg': True}
+    r = run_claude(RESCUE_PROMPT % (img, json.dumps({str(i): t for i, t in enumerate(T)}, ensure_ascii=False)), ai_model('best'), 300,
+                   ('--allowedTools', 'Read', '--add-dir', imgdir))
+    m = re.search(r'\{[\s\S]*\}', r.stdout or '')
+    if r.returncode != 0 or not m: return {'ok': False, 'error': ((r.stderr or r.stdout or '').strip().splitlines() or ['沒有回應'])[-1][:200]}
+    try: blocks = [b_ for b_ in (json.loads(m.group(0)).get('blocks') or []) if isinstance(b_, dict)]
+    except ValueError: return {'ok': False, 'error': 'AI 回傳的格式不對'}
+    os.makedirs(os.path.join(d, 'figs'), exist_ok=True)
+    with LOCK:
+        pages = read_json(os.path.join(d, 'pages.json')) or []
+        if pno in used_pages(read_json(os.path.join(d, 'state.json'), {})): return {'ok': True, 'skip': 'used'}
+        T = [x for x in pages[pno] if is_text(x)]
+        repl, drop = {}, set()
+        for k, b_ in enumerate(blocks):
+            ps = sorted({int(x) for x in (b_.get('paras') or []) if str(x).lstrip('-').isdigit() and 0 <= int(x) < len(T)})
+            ps = [i for i in ps if len(T[i]) <= 300]                          # 長段落是內文，不准換掉
+            bb = b_.get('bbox')
+            if not ps or not (isinstance(bb, list) and len(bb) == 4): continue
+            name = 'ai_p%d_%d.png' % (pno + 1, k); size = _crop(img, bb, os.path.join(d, 'figs', name))
+            if not size: continue
+            item = {'t': 'table' if b_.get('kind') == 'table' and b_.get('rows') else 'fig', 'src': name, 'w': size[0], 'h': size[1],
+                    'cap': str(b_.get('title') or '')[:200], 'ai': True}
+            if item['t'] == 'table': item['rows'] = [[str(c) for c in row] for row in b_['rows'] if isinstance(row, list)][:200]
+            repl[ps[0]] = item; drop |= set(ps)
+        if not repl: return {'ok': True, 'blocks': 0, 't': int(time.time())}
+        out, ti = [], 0
+        for x in pages[pno]:
+            if is_text(x):
+                if ti in repl: out.append(repl[ti])
+                if ti not in drop: out.append(x)
+                ti += 1
+            else: out.append(x)
+        pages[pno] = out; save_pages(d, pages)
+    blog(bid, '圖表救援：第 %d 頁換回 %d 個圖表／表格' % (pno + 1, len(repl)))
+    return {'ok': True, 'blocks': len(repl), 't': int(time.time())}
+
+
 PROOF_ACTIVE = set()          # 正在校對的書（同一本不會同時跑兩份）
 
 
@@ -1084,7 +1170,7 @@ def proof_worker():
         try: proof_job(bid)
         except Exception as e:
             import traceback; traceback.print_exc()
-            update_book(bid, proof={'status': 'error', 'error': str(e)[:300]})
+            update_book(bid, proof={'status': 'error', 'error': str(e)[:300]}); blog(bid, 'AI 校對當掉：' + traceback.format_exc()[-500:])
         finally:
             with LOCK: PROOF_ACTIVE.discard(bid)
 
@@ -1121,7 +1207,7 @@ def proof_job(bid):
                 b = find_book(load_index(), bid); pr = dict((b or {}).get('proof') or {}); pr['done'] = pr.get('done', 0) + 1
                 pr['rev'] = int(time.time() * 1000); update_book(bid, proof=pr)
         with ThreadPoolExecutor(max_workers=3) as ex: list(ex.map(rone, empty))
-        if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
+        if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); blog(bid, 'AI 校對停止：' + stop[0]); return
         with LOCK:
             pages = read_json(os.path.join(d, 'pages.json')) or []
             ix = load_index(); bb = find_book(ix, bid)
@@ -1149,14 +1235,33 @@ def proof_job(bid):
         rr = recs(kind)
         if todo and all((rr.get(str(i + 1)) or {}).get('noimg') for i in todo) and not stop[0]:   # 一頁圖都畫不出來：不要假裝在跑，直接告訴使用者原因
             stop[0] = '沒辦法把 PDF 頁面畫成圖給 AI 看' + ('：' + RENDER_ERR[bid] if RENDER_ERR.get(bid) else '（Docling 環境有問題，重開 App 會重新檢查）')
+    # 第 0.5 輪：圖表、表格被抽成一行行數字的頁 → Sonnet 看頁面圖，換回圖表截圖／表格（做過的頁不再做）
+    rs = read_json(os.path.join(d, 'rescue.json'), {}) or {}
+    with LOCK: pages = read_json(os.path.join(d, 'pages.json')) or []
+    fz = used_pages(read_json(os.path.join(d, 'state.json'), {}))
+    dpages = [i for i, pg in enumerate(pages) if i not in fz and data_runs(pg) and not (rs.get(str(i + 1)) or {}).get('t')]
+    if dpages and os.path.exists(VPY):
+        update_book(bid, proof={'status': 'running', 'phase': 'rescue', 'done': 0, 'total': len(dpages)})
+        blog(bid, '圖表救援開始：%d 頁有被抽成文字的圖表數字' % len(dpages))
+        imgdir = render_pages(bid, [i + 1 for i in dpages])
+        for k, i in enumerate(dpages):
+            try: r = rescue_page(bid, i, imgdir)
+            except RuntimeError as e: blog(bid, '圖表救援失敗：' + str(e)); break
+            if r is None: continue
+            with LOCK:
+                fn = os.path.join(d, 'rescue.json'); rr = read_json(fn, {}) or {}; rr[str(i + 1)] = r; write_json(fn, rr)
+            update_book(bid, proof={'status': 'running', 'phase': 'rescue', 'done': k + 1, 'total': len(dpages)})
+        with LOCK: pages = read_json(os.path.join(d, 'pages.json')) or []
+        textp = [i for i, pg in enumerate(pages) if any(is_text(x) for x in pg)]; TP = set(textp)
     # 第 1 輪：Haiku 每一頁（Sonnet 已經看過的頁就不用）
     best_done = checked('best')
     want = [i for i in textp if i not in best_done]
     todo = sorted(set(want) - checked('fast'))
     if todo:
         update_book(bid, proof={'status': 'running', 'phase': 'fast', 'done': len(want) - len(todo), 'total': len(want)})
+        blog(bid, 'AI 校對（Haiku 每一頁）開始：%d 頁' % len(todo))
         run_round(todo, 'fast', 3)
-    if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
+    if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); blog(bid, 'AI 校對停止：' + stop[0]); return
     # 第 2 輪：Sonnet 抽查（這本書設定成只做第 1 輪就跳過；之後可以再單獨補做）
     tops = [int(x) for x in ((find_book(load_index(), bid) or {}).get('proofTopPages') or []) if str(x).isdigit()]
     if tops:                                    # 指定交給 Opus 的頁（Sonnet 修不了的）：這一頁和前後各 5 頁
@@ -1165,7 +1270,7 @@ def proof_job(bid):
         todo = sorted(tplan - checked('top'))
         update_book(bid, proof={'status': 'running', 'phase': 'top', 'done': len(tplan) - len(todo), 'total': len(tplan)})
         if todo: run_round(todo, 'top', 1)
-        if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
+        if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); blog(bid, 'AI 校對停止：' + stop[0]); return
         update_book(bid, proofTopPages=[], proofTopNear=PROOF_TOP_NEAR)
     if (find_book(load_index(), bid) or {}).get('proofFastOnly'):
         if (find_book(load_index(), bid) or {}).get('proofFigs'):     # 補做：只用 Sonnet 看有圖片、表格的頁和前後各一頁
@@ -1175,7 +1280,7 @@ def proof_job(bid):
             todo = sorted(fplan - checked('best'))
             update_book(bid, proof={'status': 'running', 'phase': 'best', 'done': len(fplan) - len(todo), 'total': len(fplan)})
             if todo: run_round(todo, 'best', 2)
-            if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
+            if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); blog(bid, 'AI 校對停止：' + stop[0]); return
             update_book(bid, proofFigs=False)
         update_book(bid, proof={'status': 'done', 'done': len(textp), 'total': len(textp), 'rev': int(time.time() * 1000), 'bestPending': True}); return
     lost = read_json(os.path.join(d, 'lost.json'), {}) or {}
@@ -1197,7 +1302,7 @@ def proof_job(bid):
         if not todo or stop[0]: break
         run_round(todo, 'best', 2)
     total = len(plan)
-    if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
+    if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); blog(bid, 'AI 校對停止：' + stop[0]); return
     # 第 3 輪：Sonnet 也解決不了的頁（修正套不上去、或者看完還是像亂碼）→ Opus 看這一頁和前後各 5 頁
     with LOCK:
         pages = read_json(os.path.join(d, 'pages.json')) or []
@@ -1215,7 +1320,7 @@ def proof_job(bid):
     if todo:
         update_book(bid, proof={'status': 'running', 'phase': 'top', 'done': len(top_plan) - len(todo), 'total': len(top_plan)})
         run_round(todo, 'top', 1)
-        if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); return
+        if stop[0]: update_book(bid, proof={'status': 'error', 'error': stop[0][:300]}); blog(bid, 'AI 校對停止：' + stop[0]); return
     fixed = 0
     with LOCK:                                                              # 之前沒套上的修正再套一次（不用再問 AI）
         pages = read_json(os.path.join(d, 'pages.json')) or []
@@ -1233,6 +1338,7 @@ def proof_job(bid):
     with LOCK:
         pages = read_json(os.path.join(d, 'pages.json')) or []
     update_book(bid, proof={'status': 'done', 'done': total, 'total': total, 'fixed': fixed, 'rev': int(time.time() * 1000)}, ocrBad=bad_pages(pages))
+    blog(bid, 'AI 校對完成：修正 %d 處' % fixed)
 
 
 # ---------- Docling：版面解析（圖片、表格、段落）。裝在 Readiverse 自己的 Python 3.12 環境 ----------
@@ -1508,7 +1614,7 @@ def parse_worker():
         try: parse_job(bid)
         except Exception as e:
             import traceback; traceback.print_exc()
-            update_book(bid, parse={'status': 'error', 'error': str(e)[:300]})
+            update_book(bid, parse={'status': 'error', 'error': str(e)[:300]}); blog(bid, '版面解析當掉：' + traceback.format_exc()[-500:])
 
 
 def parse_job(bid):
@@ -1518,6 +1624,7 @@ def parse_job(bid):
     d = os.path.join(LIB, bid); pdf = os.path.join(d, 'book.pdf'); figdir = os.path.join(d, 'figs')
     st = dict(b.get('parse') or {}); start = int(st.get('next') or 0) + 1
     update_book(bid, parse={'status': 'running', 'next': start - 1, 'total': b.get('pages') or 0})
+    blog(bid, '版面解析開始（Docling，從第 %d 頁）' % start)
     errf = os.path.join(HOME_DIR, 'docling-parse.log'); os.makedirs(HOME_DIR, exist_ok=True)
     elog = open(errf, 'w', encoding='utf-8', errors='replace')            # Docling 的錯誤訊息（失敗時顯示原因）
     p = subprocess.Popen([VPY, os.path.join(ROOT, 'docling_worker.py'), pdf, figdir, '20', str(start)],
@@ -1576,10 +1683,14 @@ def parse_job(bid):
         try: why = [x for x in open(errf, encoding='utf-8', errors='replace').read().strip().splitlines() if x.strip() and 'Warning' not in x][-1][:200]
         except Exception: why = ''
         update_book(bid, parse={'status': 'error', 'error': 'Docling 解析失敗（代碼 %s）%s' % (p.returncode, '：' + why if why else '')})
+        try: blog(bid, '版面解析失敗（代碼 %s）：%s' % (p.returncode, ' | '.join([x for x in open(errf, encoding='utf-8', errors='replace').read().strip().splitlines() if x.strip()][-6:])))
+        except Exception: blog(bid, '版面解析失敗（代碼 %s）' % p.returncode)
         queue_proof(bid); return                                                       # 解析失敗：AI 直接看頁面圖讀
     with LOCK:
         pages = read_json(os.path.join(d, 'pages.json')) or []
         write_json(os.path.join(d, 'lost.json'), lost)
+        blog(bid, '版面解析完成：%d 頁、%d 張圖表' % (total, sum(1 for pg in pages for x in pg if isinstance(x, dict))))
+        threading.Thread(target=lambda: (time.sleep(2), (find_book(load_index(), bid) or {}).get('ai', {}).get('status') == 'done' and auto_cover(bid)), daemon=True).start()   # 圖都有了：AI 判斷完書名的話就找封面
         b = update_book(bid, parse={'status': 'done', 'next': total, 'total': total, 'rev': int(time.time() * 1000)},
                         hasText=sum(len(page_text(pg)) for pg in pages) > 40)
     if b and b.get('noProofOnce'):                                     # 這次重新解析只改排版：不重新校對（不花額度）
@@ -1635,6 +1746,117 @@ def render_cover(bid, page_no):
     return r.returncode == 0
 
 
+# ---------- 自動找封面：PDF 第一頁像封面 → PDF 裡的照片 → 網路上的書封（Open Library）→ AI 依主題畫插畫 ----------
+COVER_BUSY = set()
+
+
+def blog(bid, msg):
+    """這本書的處理紀錄（解析、AI、校對、封面…）：存在書的資料夾裡（跟著雲端同步，別台電腦卡住也看得到原因）"""
+    try:
+        f = os.path.join(LIB, bid, 'process.log')
+        line = '%s [%s] %s\n' % (time.strftime('%Y-%m-%d %H:%M:%S'), globals().get('DEVICE', '?'), str(msg).replace('\n', ' ')[:600])
+        if os.path.exists(f) and os.path.getsize(f) > 200000:                      # 太大：只留後半
+            with open(f, encoding='utf-8', errors='replace') as fh: old = fh.read()[-100000:]
+            with open(f, 'w', encoding='utf-8') as fh: fh.write(old)
+        with open(f, 'a', encoding='utf-8') as fh: fh.write(line)
+    except Exception: pass
+
+
+def _cover_from_figs(bid):
+    """書裡（前 3 頁）最像「主圖」的照片當封面：夠大、不是長條圖這種大部分白底的圖表"""
+    d = os.path.join(LIB, bid); pages = read_json(os.path.join(d, 'pages.json')) or []
+    cands = []
+    for pg in pages[:3]:
+        for x in pg:
+            if isinstance(x, dict) and x.get('src') and x.get('t') != 'table' and not str(x.get('cap') or '').lower().startswith('source'):
+                f = os.path.join(d, 'figs', x['src'])
+                if os.path.exists(f): cands.append(f)
+    if not cands or not os.path.exists(VPY): return False
+    code = ('import sys,json\nfrom PIL import Image\nout=[]\n'
+            'for f in sys.argv[2:]:\n'
+            '  im=Image.open(f).convert("RGB"); w,h=im.size; s=im.resize((48,48))\n'
+            '  px=list(s.getdata()); white=sum(1 for r,g,b in px if r>235 and g>235 and b>235)/len(px)\n'
+            '  uniq=len(set((r//24,g//24,b//24) for r,g,b in px))\n'
+            '  out.append({"f":f,"w":w,"h":h,"white":white,"uniq":uniq})\n'
+            'best=max([o for o in out if o["w"]*o["h"]>=300*200 and 0.45<=o["w"]/o["h"]<=2.4 and o["white"]<0.45 and o["uniq"]>=40] or [None], key=lambda o:(o or {}).get("w",0)*(o or {}).get("h",0))\n'
+            'if best:\n'
+            '  im=Image.open(best["f"]).convert("RGB"); W,H=im.size; t=3/4\n'
+            '  if W/H>t: nw=int(H*t); im=im.crop(((W-nw)//2,0,(W-nw)//2+nw,H))\n'
+            '  else: nh=int(W/t); im=im.crop((0,max(0,(H-nh)//4),W,max(0,(H-nh)//4)+nh))\n'
+            '  im.resize((480,640)).save(sys.argv[1],"JPEG",quality=86)\n'
+            'print(json.dumps(bool(best)))')
+    r = subprocess.run([VPY, '-c', code, os.path.join(d, 'cover.jpg')] + cands, capture_output=True, text=True, timeout=120, env=CHILD_ENV)
+    return r.returncode == 0 and r.stdout.strip().endswith('true')
+
+
+def _cover_from_openlibrary(b):
+    """真正的書：用書名、作者到 Open Library 找出版的書封（找不到就算了）"""
+    q = urllib.parse.urlencode({'title': b.get('title') or '', 'author': b.get('author') or '', 'limit': 3, 'fields': 'cover_i,title'})
+    try:
+        with urllib.request.urlopen(urllib.request.Request('https://openlibrary.org/search.json?' + q, headers={'User-Agent': 'Readiverse'}), timeout=15) as r:
+            docs = json.loads(r.read().decode('utf-8')).get('docs') or []
+        cid = next((x['cover_i'] for x in docs if x.get('cover_i')), None)
+        if not cid: return False
+        with urllib.request.urlopen('https://covers.openlibrary.org/b/id/%s-L.jpg?default=false' % cid, timeout=20) as r:
+            data = r.read()
+        if len(data) < 5000 or data[:2] != b'\xff\xd8': return False
+        with open(os.path.join(LIB, b['id'], 'cover.jpg'), 'wb') as f: f.write(data)
+        return True
+    except Exception: return False
+
+
+def _safe_svg(t):
+    """AI 畫的 SVG：只留圖形（拿掉 script、事件、外部連結、文字）"""
+    m = re.search(r'<svg[\s\S]*?</svg>', t or '')
+    if not m: return None
+    s_ = m.group(0)
+    s_ = re.sub(r'<(script|foreignObject|image|text|a|style)[\s\S]*?</\1>|<(script|image|text|a)\b[^>]*/>', '', s_, flags=re.I)
+    s_ = re.sub(r'\son\w+\s*=\s*("[^"]*"|\'[^\']*\')', '', s_, flags=re.I)
+    s_ = re.sub(r'(?:xlink:)?href\s*=\s*("(?!#)[^"]*"|\'(?!#)[^\']*\')', '', s_, flags=re.I)
+    if 'xmlns=' not in s_[:200]: s_ = s_.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"', 1)
+    return s_ if len(s_) < 200000 and len(s_) > 200 else None
+
+
+def _cover_ai_svg(b):
+    """AI 依主題畫一張插畫（向量圖，不放文字；書名作者由 App 疊在上面）"""
+    prompt = ('Design original cover ARTWORK for this %s as a single SVG image (viewBox="0 0 600 800").\n'
+              'Title: %s\nAuthor: %s\nTopics: %s\n'
+              'Make a tasteful flat / editorial illustration that evokes the subject (symbolic objects, scenes, landscapes or abstract shapes), '
+              'with a harmonious palette of 4-6 colors and a calm area in the top 45%% where the app will print the title. '
+              'Rules: NO text, letters or numbers; no logos or brand marks; no real people\'s likenesses; no external images, fonts, scripts or links; '
+              'only shapes, paths and gradients. Reply with ONLY the <svg>…</svg> code.'
+              % ('news article' if (b.get('pages') or 0) < 30 else 'book', b.get('title') or '', b.get('author') or '', ', '.join(b.get('tags') or []) or b.get('category') or ''))
+    r = run_claude(prompt, ai_model('best'), 240)
+    svg = _safe_svg(r.stdout or '')
+    if not svg: return False
+    with open(os.path.join(LIB, b['id'], 'cover.svg'), 'w', encoding='utf-8') as f: f.write(svg)
+    return True
+
+
+def auto_cover(bid, force=False, only=None):
+    """沒有封面的書自動找一張。force：使用者在「詳細資料」按的（不管現在有沒有封面）；only='ai' 只畫插畫"""
+    with LOCK:
+        b = find_book(load_index(), bid)
+    if not b or bid in COVER_BUSY: return b
+    if not force and (b.get('coverUser') or (b.get('cover') and b.get('coverFmt') != 'svg')): return b
+    COVER_BUSY.add(bid)
+    try:
+        steps = [('ai', lambda: _cover_ai_svg(b))] if only == 'ai' else [
+            ('fig', lambda: _cover_from_figs(bid)),
+            ('ol', lambda: (b.get('pages') or 0) >= 60 and _cover_from_openlibrary(b)),
+            ('ai', lambda: _cover_ai_svg(b))]
+        for name, fn in steps:
+            try: ok = fn()
+            except Exception as e: print('cover', name, e); ok = False; blog(bid, '封面（%s）出錯：%s' % (name, e))
+            blog(bid, '封面：%s %s' % ({'fig': 'PDF 裡的照片', 'ol': 'Open Library 書封', 'ai': 'AI 插畫'}[name], '成功' if ok else '沒有'))
+            if ok:
+                return update_book(bid, cover=True, coverFmt='svg' if name == 'ai' else 'jpg', coverSrc=name, coverV=int(time.time() * 1000),
+                                   coverUser=bool(force))
+        return b
+    finally:
+        COVER_BUSY.discard(bid)
+
+
 def ai_worker():
     while True:
         bid = AIQ.get()
@@ -1653,7 +1875,8 @@ def ai_job(bid):
     update_book(bid, ai={'status': 'running'})
     try: m = ai_meta(b, pages, ix['categories'])
     except RuntimeError as e:
-        update_book(bid, ai={'status': 'error', 'error': str(e)[:300]}); return
+        update_book(bid, ai={'status': 'error', 'error': str(e)[:300]}); blog(bid, 'AI 判斷書名失敗：' + str(e)); return
+    blog(bid, 'AI 判斷書名：%s／%s／%s' % (m.get('title'), m.get('author'), m.get('category')))
     with LOCK:
         ix = load_index(); b = find_book(ix, bid)
         if not b: return
@@ -1667,7 +1890,10 @@ def ai_job(bid):
         b['ai'] = {'status': 'done'}; save_index(ix)
     if cover_job:
         DOCLING_READY.wait(900)
-        if render_cover(bid, cp): update_book(bid, cover=True, coverV=int(time.time() * 1000))
+        if render_cover(bid, cp): update_book(bid, cover=True, coverFmt='jpg', coverV=int(time.time() * 1000))
+    b2 = find_book(load_index(), bid) or {}
+    if not b2.get('cover') and (b2.get('parse') or {}).get('status') in ('done', 'error'):   # 解析好了（圖都在了）還沒有封面：自動找
+        threading.Thread(target=auto_cover, args=(bid,), daemon=True).start()
 
 
 def ai_clean_page(pg):
@@ -1745,8 +1971,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send_file(os.path.join(book_dir(parts[1]), 'figs', parts[3]), 'image/png')
             if parts[:1] == ['books'] and len(parts) == 3 and m == 'GET':
                 fn = parts[2]
-                if fn not in ('book.pdf', 'cover.jpg'): return self.err(404, 'not found')
-                return self.send_file(os.path.join(book_dir(parts[1]), fn), 'application/pdf' if fn.endswith('pdf') else 'image/jpeg')
+                if fn not in ('book.pdf', 'cover.jpg', 'cover.svg'): return self.err(404, 'not found')
+                return self.send_file(os.path.join(book_dir(parts[1]), fn), 'application/pdf' if fn.endswith('pdf') else 'image/svg+xml' if fn.endswith('svg') else 'image/jpeg')
             if parts[:1] != ['api']: return self.err(404, 'not found')
             return self.api(m, parts[1:], qs)
         except ValueError as e: return self.err(400, str(e))
@@ -1969,11 +2195,23 @@ class H(BaseHTTPRequestHandler):
                 data = self.body_bytes()
                 if data[:2] != b'\xff\xd8': return self.err(400, '封面要是 JPEG')
                 with open(os.path.join(d, 'cover.jpg'), 'wb') as f: f.write(data)
-                return self.send(200, update_book(bid, cover=True, coverV=int(time.time() * 1000), coverUser=bool(qs.get('user'))))
+                return self.send(200, update_book(bid, cover=True, coverFmt='jpg', coverSrc='user' if qs.get('user') else 'page', coverV=int(time.time() * 1000), coverUser=bool(qs.get('user'))))
+            if sub == 'log' and m == 'GET':                # 這本書的處理紀錄（最後 200 行）
+                try:
+                    with open(os.path.join(d, 'process.log'), encoding='utf-8', errors='replace') as fh: lines = fh.read().splitlines()[-200:]
+                except OSError: lines = []
+                return self.send(200, {'lines': lines})
+            if sub == 'cover-auto' and m == 'POST':        # 「詳細資料」：自動找封面（PDF 的照片 → 網路書封 → AI 插畫）／只要 AI 插畫
+                body = self.body_json(); only = 'ai' if body.get('ai') else None
+                blog(bid, '手動要求重新找封面' + ('（AI 插畫）' if only else ''))
+                b2 = auto_cover(bid, force=True, only=only)
+                if not b2 or b2.get('coverV') == b.get('coverV'): return self.err(502, '找不到合適的封面' + ('：AI 插畫失敗，再試一次' if only else ''))
+                return self.send(200, b2)
             if sub == 'cover' and m == 'DELETE':           # 不用圖片，改用設計好的封面（書名＋作者）
-                try: os.remove(os.path.join(d, 'cover.jpg'))
-                except OSError: pass
-                return self.send(200, update_book(bid, cover=False, coverV=int(time.time() * 1000), coverUser=True))
+                for fn in ('cover.jpg', 'cover.svg'):
+                    try: os.remove(os.path.join(d, fn))
+                    except OSError: pass
+                return self.send(200, update_book(bid, cover=False, coverFmt=None, coverSrc=None, coverV=int(time.time() * 1000), coverUser=True))
             if sub == 'state' and m == 'PUT':
                 st = self.body_json()
                 if not isinstance(st, dict): return self.err(400, 'state 格式不對')

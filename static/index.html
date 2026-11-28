@@ -715,9 +715,11 @@ function aiTag(b){ const a=b.ai||{}, r=b.parse||{}, sp='<span class="spin"></spa
   if(r.status==='running') return `<span class="aist" title="Docling 在背景解析版面：分段、圖片、表格">${sp}版面解析中${r.total?` ${Math.min(r.next||0,r.total)}/${r.total} 頁`:''}</span>`;
   if(r.status==='queued') return `<span class="aist">${sp}${CAPS.docling&&CAPS.docling.status==='installing'?'等 Docling 安裝好':'等待版面解析'}</span>`;
   if(a.status==='running'||a.status==='queued') return `<span class="aist">${sp}AI 判斷書名、分類中</span>`;
-  const pf=b.proof||{}; if(pf.status==='running'||pf.status==='queued') return `<span class="aist" title="${pf.phase==='top'?'Sonnet 也修不好的頁：Opus 看這一頁和前後各 5 頁':pf.phase==='best'?'Sonnet 每 3 頁抽查一頁，有問題再看前後各 2 頁':pf.phase==='read'?'抽不出文字的頁：AI 直接看頁面圖讀出內文':'Haiku 每一頁對照原書，修正漏字和錯字'}">${sp}${pf.phase==='best'?'AI 抽查中':pf.phase==='top'?'AI 精修中':pf.phase==='read'?'AI 讀取頁面中':'AI 校對中'} ${pf.done||0}/${pf.total||0} 頁</span>`;
+  const pf=b.proof||{}; if((pf.status==='running'||pf.status==='queued')&&pf.phase==='rescue'&&r.status==='error') return `<span class="aist" title="版面解析程式（Docling）在這台電腦不能用：改請 AI 看每一頁，找出照片、圖表、表格">${sp}AI 解析圖表中 ${pf.done||0}/${pf.total||0} 頁</span>`;
+  if(pf.status==='running'||pf.status==='queued') return `<span class="aist" title="${pf.phase==='top'?'Sonnet 也修不好的頁：Opus 看這一頁和前後各 5 頁':pf.phase==='best'?'Sonnet 每 3 頁抽查一頁，有問題再看前後各 2 頁':pf.phase==='read'?'抽不出文字的頁：AI 直接看頁面圖讀出內文':'Haiku 每一頁對照原書，修正漏字和錯字'}">${sp}${pf.phase==='best'?'AI 抽查中':pf.phase==='top'?'AI 精修中':pf.phase==='read'?'AI 讀取頁面中':'AI 校對中'} ${pf.done||0}/${pf.total||0} 頁</span>`;
   if(pf.status==='error') return `<span class="aist bad" title="${esc(pf.error||'')}">AI 校對中斷</span>`;
   const fx=b.fix||{}; if(fx.status==='running') return `<span class="aist" title="掃描書：AI 正在修正辨識錯字比較多的頁">${sp}AI 修正錯字中 ${fx.done||0}/${fx.total||0} 頁</span>`;
+  if(r.status==='error'&&pf.status==='done') return '';                                         // Docling 失敗但 AI 已經接手做完：不用嚇人
   if(r.status==='error') return `<span class="aist bad" title="${esc(r.error||'')}">版面解析失敗</span>`;
   if(a.status==='error') return `<span class="aist bad" title="${esc(a.error||'')}">AI 判斷失敗</span>`; return ''; }
 const busy=b=>!!IMPORTING[b.id]||impLive(b)||['running','queued'].includes((b.ai||{}).status)||['running','queued'].includes((b.parse||{}).status)||(b.fix||{}).status==='running'||['running','queued'].includes((b.proof||{}).status);
@@ -1085,6 +1087,26 @@ async function importFiles(files){
   }
 }
 $('fileIn').onchange=e=>{ importFiles(e.target.files); e.target.value=''; };
+/* ---------- 沒有 Docling 的備案：伺服器請 App 用 pdf.js 畫頁面圖（給 AI 看）、裁圖表 ---------- */
+let RJ_BUSY=false;
+async function renderJobs(){
+  if(RJ_BUSY||!window.pdfjsLib) return; let J; try{ J=await api.get('/api/render-jobs'); }catch(e){ return; }
+  const ids=Object.keys(J||{}); if(!ids.length) return; RJ_BUSY=true;
+  try{
+    for(const id of ids){ const job=J[id]; let pdf;
+      const lim=(p,ms)=>Promise.race([p,new Promise((_,no)=>setTimeout(()=>no(new Error('timeout')),ms))]);   // 一個工作最多 60 秒：卡住的不要擋住其他的
+      try{ pdf=await lim(pdfjsLib.getDocument(`/books/${id}/book.pdf`).promise,60000); }catch(e){ console.warn('render job pdf',e); continue; }
+      const draw=async n=>lim((async()=>{ const pg=await pdf.getPage(n), vp=pg.getViewport({scale:2}); const c=document.createElement('canvas'); c.width=Math.round(vp.width); c.height=Math.round(vp.height);
+        const g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height); await pg.render({canvasContext:g,viewport:vp}).promise; pg.cleanup(); return c; })(),60000);
+      for(const n of job.pages||[]){ try{ const c=await draw(n); const bl=await new Promise(r=>c.toBlob(r,'image/jpeg',.85)); await api.put(`/api/books/${id}/pageimg?n=${n}`,bl,true); }catch(e){ console.warn('pageimg',n,e); } }
+      for(const cr of job.crops||[]){ try{ const c=await draw(cr.page), [x0,y0,x1,y1]=cr.bbox.map(v=>Math.max(0,Math.min(1,+v))), pad=0.004;
+          const X=Math.round(Math.max(0,x0-pad)*c.width), Y=Math.round(Math.max(0,y0-pad)*c.height), W=Math.round(Math.min(1,x1+pad)*c.width)-X, H=Math.round(Math.min(1,y1+pad)*c.height)-Y;
+          if(W<8||H<8) continue; const o=document.createElement('canvas'); o.width=W; o.height=H; o.getContext('2d').drawImage(c,X,Y,W,H,0,0,W,H);
+          const bl=await new Promise(r=>o.toBlob(r,'image/png')); await api.put(`/api/books/${id}/figcrop?name=${encodeURIComponent(cr.name)}`,bl,true); }catch(e){ console.warn('figcrop',cr,e); } }
+      try{ pdf.destroy(); }catch(e){}
+    }
+  } finally{ RJ_BUSY=false; } }
+setInterval(renderJobs,2500);
 let dragN=0;
 addEventListener('dragenter',e=>{ if(e.dataTransfer.types.includes('Files')){ dragN++; $('dropMask').hidden=false; } });
 addEventListener('dragleave',e=>{ if(e.dataTransfer.types.includes('Files')&&--dragN<=0){ dragN=0; $('dropMask').hidden=true; } });
@@ -1256,7 +1278,7 @@ function figHtml(x,i){ const src=`/books/${BOOK.meta.id}/figs/${encodeURICompone
   // 表格預設顯示原始截圖（跟書上一模一樣）；按「文字版」可以選取、複製
   const table=tab?`<div class="tblw"><table class="tbl">${x.rows.map((r,j)=>`<tr>${r.map(c=>j===0?`<th>${esc(c)}</th>`:`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table></div>`:'';
   const w=Math.round((x.w||800)/2);       // 截圖是 2 倍解析度
-  return `<figure class="fig" id="en${i}">${asText?table:`<img src="${src}" alt="${esc(x.cap||'圖')}" data-zoom="${src}" data-w="${x.w||800}" data-h="${x.h||600}" style="width:min(100%,${w}px);aspect-ratio:${x.w||4}/${x.h||3}">`}
+  return `<figure class="fig" id="en${i}">${asText?table:`<img src="${src}" alt="${esc(x.cap||'圖')}" data-zoom="${src}" onerror="this.style.visibility='hidden'" data-w="${x.w||800}" data-h="${x.h||600}" style="width:min(100%,${w}px);aspect-ratio:${x.w||4}/${x.h||3}">`}
     <figcaption>${x.cap?`<span>${esc(x.cap)}</span>`:''}${tab?`<button type="button" class="small tblsw" data-tblmode title="${asText?'改回書上的原始截圖':'改成文字版表格（可以選取、複製）'}">${asText?'原圖':'文字版'}</button>`:''}</figcaption></figure>`; }
 function pgNav(n,top){
   const prev=`<button type="button" class="pgbtn" data-turn="-1"${PG<=0?' disabled':''} title="上一頁（←）" aria-label="Previous page"><svg class="i" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg><span>Previous</span></button>`;

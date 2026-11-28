@@ -54,7 +54,7 @@ CLOUD_DIRNAME = 'Readiverse書庫'
 PORT = int(os.environ.get('READIVERSE_PORT') or 8780)
 LOCK = threading.RLock()
 ID_RE = re.compile(r'^[a-z0-9]{8,32}$')
-DEFAULT_CATS = ['小說', '非小說', '學術', '語言學習']
+DEFAULT_CATS = ['小說', '報導', '研究', '傳記', '語言學習']
 
 
 def read_json(p, default=None):
@@ -949,6 +949,44 @@ PROOF_PROMPT = ("Read %s. It is one page of a printed book.\n"
     " \"ok\":true or false}\n\n%s")
 
 
+# ---------- 沒有 Docling（Python 環境壞掉）的備案：請 App 畫面用內建的 PDF 元件（pdf.js）畫頁面圖、裁圖表 ----------
+CLIENT_JOBS = {}            # 書 id → {'pages': {頁}, 'crops': {檔名: {'page': 頁, 'bbox': [...]}}}
+CJ_LOCK = threading.Lock()
+
+
+def _png_size(f):
+    try:
+        with open(f, 'rb') as fh: h = fh.read(24)
+        import struct
+        if h[:8] == b'\x89PNG\r\n\x1a\n': return struct.unpack('>II', h[16:24])
+    except OSError: pass
+    return None
+
+
+def client_job(bid, pages=(), crops=None, timeout=180):
+    """等 App 畫面幫忙畫好頁面圖／裁好圖。App 沒開（沒人來拿工作）就等到逾時，回傳 False"""
+    d = os.path.join(LIB, bid); out = os.path.join(HOME_DIR, 'proof', bid); os.makedirs(out, exist_ok=True)
+    os.makedirs(os.path.join(d, 'figs'), exist_ok=True)
+    need = lambda: ([n for n in pages if not os.path.exists(os.path.join(out, 'p%d.jpg' % n))],
+                    {k: v for k, v in (crops or {}).items() if not os.path.exists(os.path.join(d, 'figs', k))})
+    with CJ_LOCK:
+        j = CLIENT_JOBS.setdefault(bid, {'pages': set(), 'crops': {}})
+        j['pages'] |= set(pages); j['crops'].update(crops or {})
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        np_, nc = need()
+        if not np_ and not nc: break
+        time.sleep(1)
+    with CJ_LOCK:
+        j = CLIENT_JOBS.get(bid)
+        if j:
+            j['pages'] -= set(pages)
+            for k in (crops or {}): j['crops'].pop(k, None)
+            if not j['pages'] and not j['crops']: CLIENT_JOBS.pop(bid, None)
+    np_, nc = need()
+    return not np_ and not nc
+
+
 def render_pages(bid, nums):
     """把 PDF 的頁畫成圖（給 AI 看），存在 ~/.readiverse/proof/<書>/"""
     out = os.path.join(HOME_DIR, 'proof', bid); os.makedirs(out, exist_ok=True)
@@ -961,6 +999,11 @@ def render_pages(bid, nums):
                                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=600)
             if r.returncode != 0: RENDER_ERR[bid] = ((r.stderr or r.stdout or '').strip().splitlines() or ['畫頁面圖失敗'])[-1][:200]; blog(bid, '畫頁面圖失敗：' + ' | '.join((r.stderr or r.stdout or '').strip().splitlines()[-6:]))
     elif todo: RENDER_ERR[bid] = '找不到 Docling 的 Python 環境（%s）' % VPY; blog(bid, RENDER_ERR[bid])
+    miss = [n for n in nums if not os.path.exists(os.path.join(out, 'p%d.jpg' % n))]
+    if miss:                                                              # Python 畫不出來：請 App 畫面用 pdf.js 畫
+        blog(bid, '改用 App 內建的 PDF 元件畫 %d 頁頁面圖' % len(miss))
+        if client_job(bid, pages=miss): RENDER_ERR.pop(bid, None); blog(bid, 'App 畫好頁面圖了')
+        else: blog(bid, 'App 沒有畫好頁面圖（App 畫面要開著）')
     return out
 
 
@@ -1125,11 +1168,49 @@ RESCUE_PROMPT = ("Read %s. It is one page of a document (a book, news article or
     " kind: \"chart\" or \"table\"; paras: the paragraph indexes that are its flattened data, title, labels or legend (never body prose); "
     "title: its title if printed; bbox: [x0, y0, x1, y1] as fractions (0-1) of the page width/height covering the whole chart or table "
     "including its title, axes and source line; rows (tables only): the table exactly as printed, first row = header, every value copied exactly.\n"
-    "Reply with ONLY JSON: {\"blocks\":[{\"kind\":\"chart\",\"paras\":[3,4,5],\"title\":\"...\",\"bbox\":[0.1,0.2,0.9,0.6]}]}\n\n%s")
+    "%s"
+    "Reply with ONLY JSON: {\"blocks\":[{\"kind\":\"chart\",\"paras\":[3,4,5],\"after\":2,\"title\":\"...\",\"bbox\":[0.1,0.2,0.9,0.6]}]}\n\n%s")
+RESCUE_FULL = ("ALSO (our layout extractor failed on this document, so NO images were extracted): list every photo, illustration, map, chart, diagram "
+    "or table that is part of the article itself — kind \"photo\" / \"chart\" / \"table\", its caption as title, bbox, and \"after\": the index of "
+    "the paragraph it appears after on the page (-1 = before paragraph 0); paras may be empty. Do NOT list advertisements, logos, author headshots, "
+    "play buttons, icons or website menus.\n")
 
 
-def _crop(img, bbox, out):
-    """從頁面圖裁出圖表（bbox 是 0-1 的比例），存成 PNG；回傳 (寬, 高)"""
+def _crop(img, bbox, out, bid=None, pno=None):
+    """從頁面圖裁出圖表（bbox 是 0-1 的比例），存成 PNG；回傳 (寬, 高)。Python 不能用就請 App 畫面裁"""
+    if img and os.path.exists(VPY):
+        r = _crop_py(img, bbox, out)
+        if r: return r
+    if bid is not None and pno is not None:                                # 請 App 裁（不用等）：圖的大小用頁面圖算，App 裁好圖就會出現
+        crop = {os.path.basename(out): {'page': pno + 1, 'bbox': [float(v) for v in bbox]}}
+        with CJ_LOCK:
+            j = CLIENT_JOBS.setdefault(bid, {'pages': set(), 'crops': {}}); j['crops'].update(crop)
+        threading.Thread(target=client_job, args=(bid,), kwargs={'crops': crop, 'timeout': 900}, daemon=True).start()
+        W, H = _jpg_size(img) if img else (0, 0)
+        W, H = W or 1224, H or 1584                                       # 沒有頁面圖：用 A4／Letter 兩倍大小估
+        x0, y0, x1, y1 = [max(0.0, min(1.0, float(v))) for v in bbox]
+        return (max(8, int((x1 - x0 + 0.008) * W)), max(8, int((y1 - y0 + 0.008) * H)))
+    return None
+
+
+def _jpg_size(f):
+    """JPEG 的寬高（不用 PIL）"""
+    try:
+        import struct
+        with open(f, 'rb') as fh:
+            data = fh.read(200000)
+        i = 2
+        while i < len(data) - 9:
+            if data[i] != 0xFF: i += 1; continue
+            mk = data[i + 1]
+            if mk in (0xC0, 0xC1, 0xC2):
+                h, w = struct.unpack('>HH', data[i + 5:i + 9]); return w, h
+            i += 2 + struct.unpack('>H', data[i + 2:i + 4])[0]
+    except Exception: pass
+    return 0, 0
+
+
+def _crop_py(img, bbox, out):
     code = ('import sys,json\nfrom PIL import Image\nim=Image.open(sys.argv[1]);W,H=im.size;b=json.loads(sys.argv[2])\n'
             'x0,y0,x1,y1=[max(0,min(1,float(v))) for v in b];pad=0.004\n'
             'box=(int(max(0,x0-pad)*W),int(max(0,y0-pad)*H),int(min(1,x1+pad)*W),int(min(1,y1+pad)*H))\n'
@@ -1139,7 +1220,7 @@ def _crop(img, bbox, out):
     except Exception: return None
 
 
-def rescue_page(bid, pno, imgdir):
+def rescue_page(bid, pno, imgdir, full=False):
     """一頁的圖表救援。回傳紀錄 {'blocks': n}"""
     d = os.path.join(LIB, bid)
     with LOCK: pages = read_json(os.path.join(d, 'pages.json')) or []
@@ -1148,7 +1229,7 @@ def rescue_page(bid, pno, imgdir):
     ref = page_ref(bid, pno, imgdir)
     if not ref: return {'ok': False, 'error': '沒有頁面圖', 'noimg': True}
     img = ref[2]                                                          # 沒有頁面圖（直接讀 PDF）：表格照樣做，圖表沒辦法裁圖就先不動
-    r = run_claude(RESCUE_PROMPT % (ref[0], json.dumps({str(i): t for i, t in enumerate(T)}, ensure_ascii=False)), ai_model('best'), 300,
+    r = run_claude(RESCUE_PROMPT % (ref[0], RESCUE_FULL if full else '', json.dumps({str(i): t for i, t in enumerate(T)}, ensure_ascii=False)), ai_model('best'), 300,
                    ('--allowedTools', 'Read', '--add-dir', ref[1]))
     m = re.search(r'\{[\s\S]*\}', r.stdout or '')
     if r.returncode != 0 or not m: return {'ok': False, 'error': ((r.stderr or r.stdout or '').strip().splitlines() or ['沒有回應'])[-1][:200]}
@@ -1164,20 +1245,25 @@ def rescue_page(bid, pno, imgdir):
             ps = sorted({int(x) for x in (b_.get('paras') or []) if str(x).lstrip('-').isdigit() and 0 <= int(x) < len(T)})
             ps = [i for i in ps if len(T[i]) <= 300]                          # 長段落是內文，不准換掉
             bb = b_.get('bbox')
-            if not ps or not (isinstance(bb, list) and len(bb) == 4): continue
-            name = 'ai_p%d_%d.png' % (pno + 1, k); size = _crop(img, bb, os.path.join(d, 'figs', name)) if img else None
+            if not (isinstance(bb, list) and len(bb) == 4): continue
+            try: aft = int(b_.get('after', -2))
+            except (TypeError, ValueError): aft = -2
+            if not ps and not (full and -1 <= aft < len(T)): continue           # 照片（沒有被抽成文字）：要知道放在哪一段後面
+            name = 'ai_p%d_%d.png' % (pno + 1, k); size = _crop(img, bb, os.path.join(d, 'figs', name), bid, pno)
             if not size and not (b_.get('kind') == 'table' and b_.get('rows')): continue       # 圖表一定要裁得出圖；表格沒圖也可以（顯示文字版）
             if not size: name, size = '', (0, 0)
             item = {'t': 'table' if b_.get('kind') == 'table' and b_.get('rows') else 'fig', 'src': name, 'w': size[0], 'h': size[1],
                     'cap': str(b_.get('title') or '')[:200], 'ai': True}
             if item['t'] == 'table': item['rows'] = [[str(c) for c in row] for row in b_['rows'] if isinstance(row, list)][:200]
-            repl[ps[0]] = item; drop |= set(ps)
+            if ps: repl.setdefault(ps[0], []).append(item); drop |= set(ps)
+            else: repl.setdefault(('after', aft), []).append(item)
         if not repl: return {'ok': True, 'blocks': 0, 't': int(time.time())}
-        out, ti = [], 0
+        out, ti = list(repl.get(('after', -1), [])), 0
         for x in pages[pno]:
             if is_text(x):
-                if ti in repl: out.append(repl[ti])
+                out += repl.get(ti, [])
                 if ti not in drop: out.append(x)
+                out += repl.get(('after', ti), [])
                 ti += 1
             else: out.append(x)
         pages[pno] = out; save_pages(d, pages)
@@ -1267,13 +1353,15 @@ def proof_job(bid):
     rs = read_json(os.path.join(d, 'rescue.json'), {}) or {}
     with LOCK: pages = read_json(os.path.join(d, 'pages.json')) or []
     fz = used_pages(read_json(os.path.join(d, 'state.json'), {}))
-    dpages = [i for i, pg in enumerate(pages) if i not in fz and data_runs(pg) and not (rs.get(str(i + 1)) or {}).get('t')]
+    bb_ = find_book(load_index(), bid) or {}
+    full = (bb_.get('parse') or {}).get('status') in ('error', 'skipped') and len(pages) <= 60   # Docling 失敗：每一頁都請 AI 找照片、圖表、表格
+    dpages = [i for i, pg in enumerate(pages) if i not in fz and (full and any(is_text(x) for x in pg) or data_runs(pg)) and not (rs.get(str(i + 1)) or {}).get('t')]
     if dpages:
         update_book(bid, proof={'status': 'running', 'phase': 'rescue', 'done': 0, 'total': len(dpages)})
-        blog(bid, '圖表救援開始：%d 頁有被抽成文字的圖表數字' % len(dpages))
+        blog(bid, ('Docling 沒有成功：請 AI 找 %d 頁的照片、圖表、表格' if full else '圖表救援開始：%d 頁有被抽成文字的圖表數字') % len(dpages))
         imgdir = render_pages(bid, [i + 1 for i in dpages])
         for k, i in enumerate(dpages):
-            try: r = rescue_page(bid, i, imgdir)
+            try: r = rescue_page(bid, i, imgdir, full)
             except RuntimeError as e: blog(bid, '圖表救援失敗：' + str(e)); break
             if r is None: continue
             with LOCK:
@@ -1436,31 +1524,51 @@ def _find_py310():
     return None
 
 
+def docling_give_up():
+    """Docling 裝不起來／不能用：排隊等它的書不要一直等，改走 AI（AI 看每一頁找照片、圖表、表格）"""
+    with LOCK: books = list(load_index()['books'])
+    for b in books:
+        if (b.get('parse') or {}).get('status') in ('queued', 'running'):
+            update_book(b['id'], parse={'status': 'error', 'error': 'Docling 在這台電腦不能用：' + (DOCLING.get('error') or '')})
+            blog(b['id'], 'Docling 不能用，改用 AI 解析：' + (DOCLING.get('error') or '')); queue_proof(b['id'])
+
+
 def docling_setup(force=False):
     """檢查 Docling 能不能用，不能用就在背景安裝（約 2 GB，第一次要幾分鐘）"""
     PKGS = ['docling'] + (['ocrmac'] if sys.platform == 'darwin' else [])     # ocrmac：用 Mac 內建的 Apple Vision 辨識掃描書
-    def ok(mod='docling'):
-        try: return os.path.exists(VPY) and child_run([VPY, '-c', 'import ' + mod], capture_output=True, timeout=120).returncode == 0
+    def ok(mod='ctypes, pypdfium2, docling'):
+        # 真的用到的都要試：只 import docling 會過，但 pypdfium2（PDF 元件）用到 ctypes 才會當掉（Windows 上 Anaconda 升級過的環境）
+        try: return os.path.exists(VPY) and child_run([VPY, '-c', 'import ' + mod], capture_output=True, timeout=180).returncode == 0
         except Exception: return False
-    if ok():
+    broken = os.path.exists(VPY) and not ok()
+    if broken and not os.environ.get('READIVERSE_NO_DOCLING'):            # 環境壞掉（常見：用 Anaconda 的 Python 建的，Anaconda 後來升級）：整個刪掉重建
+        try:
+            with open(os.path.join(HOME_DIR, 'docling-install.log'), 'a', encoding='utf-8') as lg:
+                r = child_run([VPY, '-c', 'import ctypes, pypdfium2, docling'], capture_output=True, text=True, timeout=180)
+                lg.write('\n=== %s 環境壞掉，刪掉重建：%s\n' % (time.strftime('%Y-%m-%d %H:%M'), ((r.stderr or '').strip().splitlines() or [''])[-1]))
+        except Exception: pass
+        shutil.rmtree(VENV, ignore_errors=True)
+    if not broken and ok():
         if sys.platform == 'darwin' and not ok('ocrmac'):           # 以前裝的環境沒有 ocrmac：補裝（很快）
             uv = _find_uv()
             try: child_run([uv, 'pip', 'install', '-q', '-p', VPY, 'ocrmac'] if uv else [VPY, '-m', 'pip', 'install', '-q', 'ocrmac'], capture_output=True, timeout=600)
             except Exception: pass
         DOCLING.update(status='ready', error=''); DOCLING_READY.set(); return
     if os.environ.get('READIVERSE_NO_DOCLING'):
-        DOCLING.update(status='unavailable', error='已關閉'); return
+        DOCLING.update(status='unavailable', error='已關閉'); docling_give_up(); return
     os.makedirs(HOME_DIR, exist_ok=True)
     log = open(os.path.join(HOME_DIR, 'docling-install.log'), 'a', encoding='utf-8')
     DOCLING.update(status='installing', error='')
     try:
         uv = _find_uv(install=True)
         if uv:
-            cmds = [[uv, 'venv', '-q', '--allow-existing', '-p', '3.12', VENV], [uv, 'pip', 'install', '-q', '-p', VPY] + PKGS]
+            # 只用 uv 自己下載的 Python（不用電腦上的 Anaconda 之類：它們升級就會把環境弄壞）
+            cmds = [[uv, 'venv', '-q', '--allow-existing', '--python-preference', 'only-managed', '-p', '3.12', VENV],
+                    [uv, 'pip', 'install', '-q', '-p', VPY] + PKGS]
         else:
             py = _find_py310()
             if not py:
-                DOCLING.update(status='unavailable', error='需要 Python 3.10 以上（或 uv）才能裝 Docling'); return
+                DOCLING.update(status='unavailable', error='需要 Python 3.10 以上（或 uv）才能裝 Docling'); docling_give_up(); return
             cmds = [[py, '-m', 'venv', VENV], [VPY, '-m', 'pip', 'install', '-q'] + PKGS]
         for c in cmds:
             log.write('$ %s\n' % ' '.join(c)); log.flush()
@@ -1469,7 +1577,7 @@ def docling_setup(force=False):
         if not ok(): raise RuntimeError('裝好了但載入失敗（看 ~/.readiverse/docling-install.log）')
         DOCLING.update(status='ready', error=''); DOCLING_READY.set()
     except Exception as e:
-        DOCLING.update(status='error', error=str(e)[:300])
+        DOCLING.update(status='error', error=str(e)[:300]); docling_give_up()
     finally:
         log.close()
 
@@ -1670,7 +1778,11 @@ def parse_worker():
         bid = PARSEQ.get()
         with LOCK: PARSE_PENDING.discard(bid)
         wait_session()
-        DOCLING_READY.wait()
+        while not DOCLING_READY.wait(5):                                   # 等 Docling 裝好；確定不能用就改走 AI，不要一直排隊
+            if DOCLING['status'] in ('unavailable', 'error'): break
+        if not DOCLING_READY.is_set():
+            update_book(bid, parse={'status': 'error', 'error': 'Docling 在這台電腦不能用：' + (DOCLING.get('error') or '')})
+            blog(bid, 'Docling 不能用，改用 AI 解析：' + (DOCLING.get('error') or '')); queue_proof(bid); continue
         try: parse_job(bid)
         except Exception as e:
             import traceback; traceback.print_exc()
@@ -1790,7 +1902,10 @@ def ai_meta(b, pages, cats):
     sample = ''.join('\n\n[PAGE %d]\n' % (i + 1) + '\n'.join(x for x in pg if is_text(x)) for i, pg in enumerate(pages[:5]))[:6000]
     prompt = ('Below is the beginning of a PDF the user imported (file name: %r), page by page. Identify the book/document. '
               'Reply with ONLY a JSON object: {"title": "...", "author": "... or empty", "category": "...", "tags": ["..", ".."], "coverPage": 0}. '
-              'category must be exactly one of %s, or "" if none fits. tags: up to 3 short topic tags in Traditional Chinese. '
+              'category must be exactly one of %s, or "" if none fits. Meanings: 小說 = fiction / novels; 報導 = news articles, magazine '
+              'features, op-eds and other journalism (including science news); 研究 = research papers, academic or scientific studies, reports, '
+              'and research-based non-fiction books (psychology, economics, business, science); 傳記 = memoirs, biographies and personal stories; '
+              '語言學習 = language-learning, exam or textbook material. tags: up to 3 short topic tags in Traditional Chinese. '
               'coverPage: the page number (1-5) that is the book\'s front cover (little text, mostly title/author), or 0 if none of them is.\n\n%s'
               % (b.get('file') or b['title'], json.dumps(cats, ensure_ascii=False), sample))
     return ai_json(prompt, dict, 180)
@@ -2041,6 +2156,9 @@ class H(BaseHTTPRequestHandler):
             return self.err(500, str(e))
 
     def api(self, m, p, qs):
+        if p == ['render-jobs'] and m == 'GET':        # App 畫面每幾秒來拿：要幫忙畫的頁面圖、要裁的圖
+            with CJ_LOCK:
+                return self.send(200, {k: {'pages': sorted(v['pages']), 'crops': [dict(c, name=n) for n, c in v['crops'].items()]} for k, v in CLIENT_JOBS.items()})
         if p == ['rev'] and m == 'GET':                 # 書庫有沒有變（書、單字、句子、筆記）：首頁每幾秒問一次，有變才重畫
             r = 0
             for fn in ('_index.json', '_單字收藏.json', '_句子收藏.json'):
@@ -2256,6 +2374,18 @@ class H(BaseHTTPRequestHandler):
                 if data[:2] != b'\xff\xd8': return self.err(400, '封面要是 JPEG')
                 with open(os.path.join(d, 'cover.jpg'), 'wb') as f: f.write(data)
                 return self.send(200, update_book(bid, cover=True, coverFmt='jpg', coverSrc='user' if qs.get('user') else 'page', coverV=int(time.time() * 1000), coverUser=bool(qs.get('user'))))
+            if sub == 'pageimg' and m == 'PUT':            # App 用 pdf.js 畫好的頁面圖（給 AI 看）
+                data = self.body_bytes(); n = int((qs.get('n') or ['0'])[0])
+                if data[:2] != b'\xff\xd8' or n < 1: return self.err(400, '要是 JPEG')
+                out = os.path.join(HOME_DIR, 'proof', bid); os.makedirs(out, exist_ok=True)
+                with open(os.path.join(out, 'p%d.jpg' % n), 'wb') as f: f.write(data)
+                return self.send(200, {'ok': True})
+            if sub == 'figcrop' and m == 'PUT':            # App 裁好的圖表
+                data = self.body_bytes(); name = os.path.basename((qs.get('name') or [''])[0])
+                if data[:8] != b'\x89PNG\r\n\x1a\n' or not re.match(r'^[\w.\-]+\.png$', name): return self.err(400, '要是 PNG')
+                os.makedirs(os.path.join(d, 'figs'), exist_ok=True)
+                with open(os.path.join(d, 'figs', name), 'wb') as f: f.write(data)
+                return self.send(200, {'ok': True})
             if sub == 'log' and m == 'GET':                # 這本書的處理紀錄（最後 200 行）
                 try:
                     with open(os.path.join(d, 'process.log'), encoding='utf-8', errors='replace') as fh: lines = fh.read().splitlines()[-200:]

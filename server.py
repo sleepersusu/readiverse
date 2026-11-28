@@ -618,7 +618,8 @@ _PRINT_HDR = [
     re.compile(r'^\s*\d{1,2}/\d{1,2}/\d{2,4},?\s+\d{1,2}:\d{2}(?:\s*[AP]M)?\b.*$', re.I),                  # 10/28/26, 4:04 PM 標題
     re.compile(r'^\s*(?:上午|下午|凌晨|清晨|早上|中午|晚上|傍晚|午夜)\d{1,2}:\d{2}\s.*$'),                     # 凌晨2:06 標題（日期被切到上一行）
     re.compile(r'^\s*https?://\S+\s*$'),                                                                   # 只有網址的一行
-    re.compile(r'^\s*[\w%.-]+/?[\w%./-]*\.(?:html?|php|aspx?)(?:\?\S*)?\s*$', re.I),                       # 網址太長換行，剩下的後半截（visa-fee.html）
+    re.compile(r'^\s*[\w%.-]+/?[\w%./-]*\.(?:html?|php|aspx?)(?:\?\S*)?(?:\s+\d{1,3}\s*/\s*\d{1,3})?\s*$', re.I),   # 網址太長換行，剩下的後半截（visa-fee.html 1/3）
+    re.compile(r'^.{3,220}?\s[-–|]\s(?:The New York Times|The Washington Post|The Guardian|BBC News|CNN|Reuters|The Atlantic|The Economist|Bloomberg|The Wall Street Journal|WSJ|NPR|Financial Times|Nature|Science|The New Yorker|Wired|TIME|Vox)\s*$'),   # 瀏覽器頁首的網頁標題「… - The New York Times」
     re.compile(r'^\s*\d{1,3}\s*/\s*\d{1,3}\s*$'),                                                            # 3/6 頁數
     re.compile(r'^\s*Listen\s*·\s*\d{1,2}:\d{2}\s*min\s*$', re.I),                                              # 新聞網站的「Listen · 6:35 min」語音按鈕
 ]
@@ -635,6 +636,7 @@ _ADS = re.compile(r'^\s*(?:'
 # 黏在段落最後面的頁尾：「…圖表說明 下午4:04 標題 - The New York Times https://… 2/6」
 _PRINT_TAIL = re.compile(r'\s*(?:\d{4}/\d{1,2}/\d{1,2}\s*)?(?:上午|下午|凌晨|清晨|早上|中午|晚上|傍晚|午夜)\d{1,2}:\d{2}\s.{0,200}?https?://\S+(?:\s+\d{1,3}/\d{1,3})?\s*$')
 _PRINT_URLTAIL = re.compile(r'\s+https?://\S+\s+\d{1,3}/\d{1,3}\s*$')
+_PRINT_NOTE = re.compile(r'\s*(?:A version of )?this article appear(?:s|ed) in print on\b.*$', re.I)       # 「This article appears in print on , Section A, Page 18 of the New York edition…」
 def strip_print_artifacts(pages):
     """拿掉瀏覽器列印的頁首頁尾（只在真的像網頁列印的 PDF 才動：至少一半的頁有這種頁首或網址）"""
     def hit(x): return is_text(x) and any(r.match(x) for r in _PRINT_HDR)
@@ -654,7 +656,10 @@ def strip_print_artifacts(pages):
             if is_text(x):
                 if url_lead(x): x = re.sub(r'^\s*https?://\S+\s+', '', x)                                 # 「網址 文章標題…」：只拿掉網址
                 x = _PRINT_URLTAIL.sub('', _PRINT_TAIL.sub('', x)).strip()
-                if not x: continue
+                x = _PRINT_NOTE.sub('', x).strip()
+                m = re.search(r'\s+(\d{1,3})\s*/\s*(\d{1,3})\s*$', x)                              # 段落最後黏著頁數「… 3/5」（分母＝總頁數才算）
+                if m and int(m.group(2)) == len(pages) and 1 <= int(m.group(1)) <= len(pages): x = x[:m.start()].rstrip()
+                if not x or hit(x): continue                                                    # 拿掉網址之後只剩「1/3」這種：也不要
                 # 圖表來源黏到下一段：「Source: … • By The New York Times The New York Times analyzed…」→ 切成兩段
                 m = re.match(r'((?:Sources?|Notes?)\s*:.*?•\s*By\s+(?:The\s+)?(?:[A-Z][\w.&’\']*\s+){0,4}?(?:Times|Post|Journal|News|Reuters|Bloomberg|Guardian|Economist|Press|Staff))\s+(?=[A-Z“"])', x)
                 if m and len(x) - m.end() > 40: q.append(m.group(1)); x = x[m.end():]
@@ -874,7 +879,7 @@ def quality_job(bid):
 
 # ---------- AI 校對：Claude 看原書每一頁的圖，逐字對照解析出來的文字，只回報差異；程式照著改（AI 不會整段重寫）----------
 PROOFQ = queue.Queue()
-READ_PROMPT = ("Read the image file %s. It is one page of a printed book. Our text extraction got NOTHING from this page "
+READ_PROMPT = ("Read %s. It is one page of a printed book. Our text extraction got NOTHING from this page "
     "(it may be a scanned image or a PDF we could not parse).\n"
     "Transcribe the body text of this page exactly as printed, word for word, in reading order. Rules:\n"
     "- One string per paragraph. Join lines inside a paragraph with spaces; join words hyphenated at a line end.\n"
@@ -885,14 +890,25 @@ READ_PROMPT = ("Read the image file %s. It is one page of a printed book. Our te
     "Reply with ONLY JSON: {\"paras\": [\"...\", \"...\"]}")
 
 
+def page_ref(bid, pno, imgdir):
+    """給 AI 看的那一頁：有頁面圖就給圖；畫不出圖（例如 Windows 上 Docling 環境壞掉）就直接給 PDF，請它只看那一頁。
+    回傳 (說明文字, --add-dir 的資料夾) 或 None"""
+    img = os.path.join(imgdir, 'p%d.jpg' % (pno + 1))
+    if os.path.exists(img): return 'the image file %s' % img, imgdir, img
+    pdf = os.path.join(LIB, bid, 'book.pdf'); b = find_book(load_index(), bid) or {}
+    if os.path.exists(pdf) and 0 < (b.get('pages') or 999) <= 30:            # 短的文章、論文：整份 PDF 給 AI（讀單頁要另外裝 pdftoppm，整份不用）
+        return ('page %d of the PDF file %s (read the whole file with the Read tool, without a pages parameter, then look ONLY at page %d)' % (pno + 1, pdf, pno + 1)), os.path.dirname(pdf), None
+    return None
+
+
 def read_page_ai(bid, pno, imgdir, kind='fast'):
     """解析不出文字的頁：讓 AI 直接看頁面圖，把內文一段一段讀出來（掃描書、壞掉的 PDF 都可以）"""
     d = os.path.join(LIB, bid)
-    img = os.path.join(imgdir, 'p%d.jpg' % (pno + 1))
-    if not os.path.exists(img): return {'ok': False, 'error': '沒有頁面圖' + ('：' + RENDER_ERR[bid] if RENDER_ERR.get(bid) else ''), 'noimg': True}
+    ref = page_ref(bid, pno, imgdir)
+    if not ref: return {'ok': False, 'error': '沒有頁面圖' + ('：' + RENDER_ERR[bid] if RENDER_ERR.get(bid) else ''), 'noimg': True}
     c = claude_path()
     if not c: raise RuntimeError('找不到 Claude Code')
-    r = run_claude(READ_PROMPT % img, ai_model(kind), 300, ('--allowedTools', 'Read', '--add-dir', imgdir))
+    r = run_claude(READ_PROMPT % ref[0], ai_model(kind), 300, ('--allowedTools', 'Read', '--add-dir', ref[1]))
     m = re.search(r'\{[\s\S]*\}', r.stdout or '')
     if r.returncode != 0 or not m:
         err = ((r.stderr or r.stdout or '').strip().splitlines() or ['沒有回應'])[-1][:200]
@@ -911,7 +927,7 @@ def read_page_ai(bid, pno, imgdir, kind='fast'):
     return {'ok': True, 'read': len(paras), 't': int(time.time())}
 
 
-PROOF_PROMPT = ("Read the image file %s. It is one page of a printed book.\n"
+PROOF_PROMPT = ("Read %s. It is one page of a printed book.\n"
     "Below is the text we extracted. \"prev_tail\" is the end of the previous page's last paragraph (this page may start in the middle of it). "
     "IMPORTANT: when a paragraph runs from the previous page onto this one, we have ALREADY joined this page's first lines onto prev_tail — "
     "so text at the top of the image may appear at the END of prev_tail instead of in paragraph 0. That is correct: it is NOT missing, never add it again. "
@@ -941,8 +957,8 @@ def render_pages(bid, nums):
         code = ('import sys,pypdfium2 as P;d=P.PdfDocument(sys.argv[1]);o=sys.argv[2]\n'
                 'for n in map(int,sys.argv[3:]): d[n-1].render(scale=2).to_pil().convert("RGB").save("%s/p%d.jpg"%(o,n),quality=85)')
         for k in range(0, len(todo), 50):
-            r = subprocess.run([VPY, '-c', code, os.path.join(LIB, bid, 'book.pdf'), out] + [str(n) for n in todo[k:k + 50]],
-                               capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=600, env=CHILD_ENV)
+            r = child_run([VPY, '-c', code, os.path.join(LIB, bid, 'book.pdf'), out] + [str(n) for n in todo[k:k + 50]],
+                               capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=600)
             if r.returncode != 0: RENDER_ERR[bid] = ((r.stderr or r.stdout or '').strip().splitlines() or ['畫頁面圖失敗'])[-1][:200]; blog(bid, '畫頁面圖失敗：' + ' | '.join((r.stderr or r.stdout or '').strip().splitlines()[-6:]))
     elif todo: RENDER_ERR[bid] = '找不到 Docling 的 Python 環境（%s）' % VPY; blog(bid, RENDER_ERR[bid])
     return out
@@ -1031,14 +1047,14 @@ def proof_page(bid, pno, imgdir, kind='best'):
     paras = [x for x in pages[pno] if is_text(x)]
     if not paras: return {'ok': True, 'skip': 'no text'}
     prev = next((x for x in reversed(pages[pno - 1]) if is_text(x)), '') if pno > 0 else ''
-    img = os.path.join(imgdir, 'p%d.jpg' % (pno + 1))
-    if not os.path.exists(img): return {'ok': False, 'error': '沒有頁面圖' + ('：' + RENDER_ERR[bid] if RENDER_ERR.get(bid) else ''), 'noimg': True}
+    ref = page_ref(bid, pno, imgdir)
+    if not ref: return {'ok': False, 'error': '沒有頁面圖' + ('：' + RENDER_ERR[bid] if RENDER_ERR.get(bid) else ''), 'noimg': True}
     figs = [x for x in pages[pno] if isinstance(x, dict)]
     payload = json.dumps({'prev_tail': prev[-200:], 'paras': {str(i): t for i, t in enumerate(paras)},
                           'figs': {str(k): (x.get('cap') or '(no caption)')[:120] for k, x in enumerate(figs)}}, ensure_ascii=False)
     c = claude_path()
     if not c: raise RuntimeError('找不到 Claude Code')
-    r = run_claude(PROOF_PROMPT % (img, payload), ai_model(kind), 300, ('--allowedTools', 'Read', '--add-dir', imgdir))
+    r = run_claude(PROOF_PROMPT % (ref[0], payload), ai_model(kind), 300, ('--allowedTools', 'Read', '--add-dir', ref[1]))
     m = re.search(r'\{[\s\S]*\}', r.stdout or '')
     if r.returncode != 0 or not m:
         err = ((r.stderr or r.stdout or '').strip().splitlines() or ['沒有回應'])[-1][:200]
@@ -1102,7 +1118,7 @@ def data_runs(pg):
     return runs
 
 
-RESCUE_PROMPT = ("Read the image file %s. It is one page of a document (a book, news article or research paper).\n"
+RESCUE_PROMPT = ("Read %s. It is one page of a document (a book, news article or research paper).\n"
     "Below are the text paragraphs we extracted from this page (keyed by index). Some of them are NOT prose: they are the data of a chart "
     "or table that got flattened into lines of numbers (axis labels, bar values, table cells), so they are unreadable and may be misaligned.\n"
     "Find every chart / graph / table on the page that this flattened data comes from. For each one reply with:\n"
@@ -1118,7 +1134,7 @@ def _crop(img, bbox, out):
             'x0,y0,x1,y1=[max(0,min(1,float(v))) for v in b];pad=0.004\n'
             'box=(int(max(0,x0-pad)*W),int(max(0,y0-pad)*H),int(min(1,x1+pad)*W),int(min(1,y1+pad)*H))\n'
             'c=im.crop(box);c.save(sys.argv[3]);print(json.dumps(c.size))')
-    r = subprocess.run([VPY, '-c', code, img, json.dumps(bbox), out], capture_output=True, text=True, timeout=60, env=CHILD_ENV)
+    r = child_run([VPY, '-c', code, img, json.dumps(bbox), out], capture_output=True, text=True, timeout=60)
     try: return tuple(json.loads(r.stdout.strip().splitlines()[-1]))
     except Exception: return None
 
@@ -1129,10 +1145,11 @@ def rescue_page(bid, pno, imgdir):
     with LOCK: pages = read_json(os.path.join(d, 'pages.json')) or []
     if pno >= len(pages): return None
     T = [x for x in pages[pno] if is_text(x)]
-    img = os.path.join(imgdir, 'p%d.jpg' % (pno + 1))
-    if not os.path.exists(img): return {'ok': False, 'error': '沒有頁面圖', 'noimg': True}
-    r = run_claude(RESCUE_PROMPT % (img, json.dumps({str(i): t for i, t in enumerate(T)}, ensure_ascii=False)), ai_model('best'), 300,
-                   ('--allowedTools', 'Read', '--add-dir', imgdir))
+    ref = page_ref(bid, pno, imgdir)
+    if not ref: return {'ok': False, 'error': '沒有頁面圖', 'noimg': True}
+    img = ref[2]                                                          # 沒有頁面圖（直接讀 PDF）：表格照樣做，圖表沒辦法裁圖就先不動
+    r = run_claude(RESCUE_PROMPT % (ref[0], json.dumps({str(i): t for i, t in enumerate(T)}, ensure_ascii=False)), ai_model('best'), 300,
+                   ('--allowedTools', 'Read', '--add-dir', ref[1]))
     m = re.search(r'\{[\s\S]*\}', r.stdout or '')
     if r.returncode != 0 or not m: return {'ok': False, 'error': ((r.stderr or r.stdout or '').strip().splitlines() or ['沒有回應'])[-1][:200]}
     try: blocks = [b_ for b_ in (json.loads(m.group(0)).get('blocks') or []) if isinstance(b_, dict)]
@@ -1148,8 +1165,9 @@ def rescue_page(bid, pno, imgdir):
             ps = [i for i in ps if len(T[i]) <= 300]                          # 長段落是內文，不准換掉
             bb = b_.get('bbox')
             if not ps or not (isinstance(bb, list) and len(bb) == 4): continue
-            name = 'ai_p%d_%d.png' % (pno + 1, k); size = _crop(img, bb, os.path.join(d, 'figs', name))
-            if not size: continue
+            name = 'ai_p%d_%d.png' % (pno + 1, k); size = _crop(img, bb, os.path.join(d, 'figs', name)) if img else None
+            if not size and not (b_.get('kind') == 'table' and b_.get('rows')): continue       # 圖表一定要裁得出圖；表格沒圖也可以（顯示文字版）
+            if not size: name, size = '', (0, 0)
             item = {'t': 'table' if b_.get('kind') == 'table' and b_.get('rows') else 'fig', 'src': name, 'w': size[0], 'h': size[1],
                     'cap': str(b_.get('title') or '')[:200], 'ai': True}
             if item['t'] == 'table': item['rows'] = [[str(c) for c in row] for row in b_['rows'] if isinstance(row, list)][:200]
@@ -1250,7 +1268,7 @@ def proof_job(bid):
     with LOCK: pages = read_json(os.path.join(d, 'pages.json')) or []
     fz = used_pages(read_json(os.path.join(d, 'state.json'), {}))
     dpages = [i for i, pg in enumerate(pages) if i not in fz and data_runs(pg) and not (rs.get(str(i + 1)) or {}).get('t')]
-    if dpages and os.path.exists(VPY):
+    if dpages:
         update_book(bid, proof={'status': 'running', 'phase': 'rescue', 'done': 0, 'total': len(dpages)})
         blog(bid, '圖表救援開始：%d 頁有被抽成文字的圖表數字' % len(dpages))
         imgdir = render_pages(bid, [i + 1 for i in dpages])
@@ -1358,6 +1376,38 @@ VPY = os.path.join(VENV, 'Scripts', 'python.exe') if sys.platform.startswith('wi
 DOCLING = {'status': 'checking', 'error': ''}      # checking / installing / ready / unavailable / error
 # 叫 Docling 環境的 Python 時一律用 UTF-8：Windows 預設用系統編碼（cp950），遇到 ʻ、—、下午 這種字一印出來就當掉（Docling 解析失敗 代碼 1、沒有頁面圖）
 CHILD_ENV = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONUTF8='1')
+for _k in ('PYTHONHOME', 'PYTHONPATH', 'PYTHONSTARTUP', 'PYTHONEXECUTABLE', '_MEIPASS2', '_PYI_APPLICATION_HOME_DIR', '_PYI_ARCHIVE_FILE', '_PYI_PARENT_PROCESS_LEVEL'):
+    CHILD_ENV.pop(_k, None)
+if getattr(sys, 'frozen', False):
+    # 打包版（PyInstaller）會把自己帶的 Python DLL 資料夾加進 DLL 搜尋路徑，Windows 上子程式會跟著載到錯的版本：
+    # Docling 環境的 Python 一 import ctypes 就當掉（AttributeError: class must define a '_type_' attribute）
+    _mei = getattr(sys, '_MEIPASS', '') or os.path.dirname(sys.executable)
+    CHILD_ENV['PATH'] = os.pathsep.join(x for x in CHILD_ENV.get('PATH', '').split(os.pathsep) if x and not os.path.normcase(x).startswith(os.path.normcase(_mei)))
+_SPAWN = threading.Lock()
+
+
+def child_popen(args, **kw):
+    """開 Docling 環境的 Python（子程式）。Windows 打包版：開的那一瞬間把 DLL 搜尋路徑還原成系統預設，開好馬上改回來
+    （子程式的 DLL 路徑在建立的時候就決定了；App 自己還需要原本的路徑）"""
+    kw.setdefault('env', CHILD_ENV)
+    if not (WIN and getattr(sys, 'frozen', False)): return subprocess.Popen(args, **kw)
+    import ctypes
+    k32 = ctypes.windll.kernel32; buf = ctypes.create_unicode_buffer(4096); n = k32.GetDllDirectoryW(4096, buf)
+    with _SPAWN:
+        k32.SetDllDirectoryW(None)
+        try: return subprocess.Popen(args, **kw)
+        finally: k32.SetDllDirectoryW(buf.value if n else None)
+
+
+def child_run(args, timeout=None, text=False, encoding=None, errors=None, capture_output=False, **kw):
+    """subprocess.run 的版本（用 child_popen 開）"""
+    if capture_output: kw['stdout'] = kw['stderr'] = subprocess.PIPE
+    if text or encoding: kw.update(text=True, encoding=encoding or 'utf-8', errors=errors or 'replace')
+    p = child_popen(args, **kw)
+    try: out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.kill(); p.communicate(); raise
+    return subprocess.CompletedProcess(args, p.returncode, out, err)
 RENDER_ERR = {}
 DOCLING_READY = threading.Event()
 
@@ -1390,12 +1440,12 @@ def docling_setup(force=False):
     """檢查 Docling 能不能用，不能用就在背景安裝（約 2 GB，第一次要幾分鐘）"""
     PKGS = ['docling'] + (['ocrmac'] if sys.platform == 'darwin' else [])     # ocrmac：用 Mac 內建的 Apple Vision 辨識掃描書
     def ok(mod='docling'):
-        try: return os.path.exists(VPY) and subprocess.run([VPY, '-c', 'import ' + mod], capture_output=True, timeout=120, env=CHILD_ENV).returncode == 0
+        try: return os.path.exists(VPY) and child_run([VPY, '-c', 'import ' + mod], capture_output=True, timeout=120).returncode == 0
         except Exception: return False
     if ok():
         if sys.platform == 'darwin' and not ok('ocrmac'):           # 以前裝的環境沒有 ocrmac：補裝（很快）
             uv = _find_uv()
-            try: subprocess.run([uv, 'pip', 'install', '-q', '-p', VPY, 'ocrmac'] if uv else [VPY, '-m', 'pip', 'install', '-q', 'ocrmac'], capture_output=True, timeout=600)
+            try: child_run([uv, 'pip', 'install', '-q', '-p', VPY, 'ocrmac'] if uv else [VPY, '-m', 'pip', 'install', '-q', 'ocrmac'], capture_output=True, timeout=600)
             except Exception: pass
         DOCLING.update(status='ready', error=''); DOCLING_READY.set(); return
     if os.environ.get('READIVERSE_NO_DOCLING'):
@@ -1414,7 +1464,7 @@ def docling_setup(force=False):
             cmds = [[py, '-m', 'venv', VENV], [VPY, '-m', 'pip', 'install', '-q'] + PKGS]
         for c in cmds:
             log.write('$ %s\n' % ' '.join(c)); log.flush()
-            r = subprocess.run(c, stdout=log, stderr=log, timeout=3600)
+            r = child_run(c, stdout=log, stderr=log, timeout=3600)
             if r.returncode != 0: raise RuntimeError('安裝失敗（看 ~/.readiverse/docling-install.log）')
         if not ok(): raise RuntimeError('裝好了但載入失敗（看 ~/.readiverse/docling-install.log）')
         DOCLING.update(status='ready', error=''); DOCLING_READY.set()
@@ -1637,8 +1687,8 @@ def parse_job(bid):
     blog(bid, '版面解析開始（Docling，從第 %d 頁）' % start)
     errf = os.path.join(HOME_DIR, 'docling-parse.log'); os.makedirs(HOME_DIR, exist_ok=True)
     elog = open(errf, 'w', encoding='utf-8', errors='replace')            # Docling 的錯誤訊息（失敗時顯示原因）
-    p = subprocess.Popen([VPY, os.path.join(ROOT, 'docling_worker.py'), pdf, figdir, '20', str(start)],
-                         stdout=subprocess.PIPE, stderr=elog, text=True, encoding='utf-8', errors='replace', env=CHILD_ENV)
+    p = child_popen([VPY, os.path.join(ROOT, 'docling_worker.py'), pdf, figdir, '20', str(start)],
+                    stdout=subprocess.PIPE, stderr=elog, text=True, encoding='utf-8', errors='replace')
     PARSE_PROC[bid] = p; total = b.get('pages') or 0; got = False; lost = {}; scanned = bool(b.get('scanned')); raw_rep = None; raw_rep6 = None
     try:
         for line in p.stdout:
@@ -1752,7 +1802,7 @@ def render_cover(bid, page_no):
     d = os.path.join(LIB, bid)
     code = ('import sys,pypdfium2 as P;d=P.PdfDocument(sys.argv[1]);p=d[int(sys.argv[2])-1];'
             's=480/p.get_width();p.render(scale=s).to_pil().convert("RGB").save(sys.argv[3],"JPEG",quality=84)')
-    r = subprocess.run([VPY, '-c', code, os.path.join(d, 'book.pdf'), str(page_no), os.path.join(d, 'cover.jpg')], capture_output=True, timeout=120, env=CHILD_ENV)
+    r = child_run([VPY, '-c', code, os.path.join(d, 'book.pdf'), str(page_no), os.path.join(d, 'cover.jpg')], capture_output=True, timeout=120)
     return r.returncode == 0
 
 
@@ -1795,7 +1845,7 @@ def _cover_from_figs(bid):
             '  else: nh=int(W/t); im=im.crop((0,max(0,(H-nh)//4),W,max(0,(H-nh)//4)+nh))\n'
             '  im.resize((480,640)).save(sys.argv[1],"JPEG",quality=86)\n'
             'print(json.dumps(bool(best)))')
-    r = subprocess.run([VPY, '-c', code, os.path.join(d, 'cover.jpg')] + cands, capture_output=True, text=True, timeout=120, env=CHILD_ENV)
+    r = child_run([VPY, '-c', code, os.path.join(d, 'cover.jpg')] + cands, capture_output=True, text=True, timeout=120)
     return r.returncode == 0 and r.stdout.strip().endswith('true')
 
 
@@ -2520,7 +2570,10 @@ def main():
     with LOCK:                                   # 上次沒做完的：接著做
         for b in load_index()['books']:
             if (b.get('ai') or {}).get('status') in ('running', 'queued'): AIQ.put(b['id'])
-            if (b.get('parse') or {}).get('status') in ('running', 'queued'): parse_put(b['id'])
+            pe = b.get('parse') or {}
+            if pe.get('status') == 'error' and 'Docling' in str(pe.get('error')) and not b.get("parseRetried") == VERSION:   # 上一版 Docling 當掉的書：更新後自動重做一次
+                update_book(b["id"], parseRetried=VERSION, parse={'status': 'queued', 'next': 0, 'total': b.get('pages') or 0}); parse_put(b['id'])
+            elif pe.get('status') in ('running', 'queued'): parse_put(b['id'])
             elif (b.get('proof') or {}).get('status') in ('running', 'queued'): PROOFQ.put(b['id'])
     srv = ThreadingHTTPServer(('127.0.0.1', PORT), H)
     url = 'http://localhost:%d' % PORT

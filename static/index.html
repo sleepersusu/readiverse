@@ -1252,7 +1252,7 @@ function zhHtml(i){ if(!ZH) return ''; const Z=ST.zh[PG];
   if(i===0&&TR_ERR[PG]) return `<div class="zh err">${esc(TR_ERR[PG])} <button type="button" class="small" data-retr>再試一次</button></div>`;
   return ''; }
 const isTxt=x=>typeof x==='string';
-function figHtml(x,i){ const src=`/books/${BOOK.meta.id}/figs/${encodeURIComponent(x.src)}`, tab=x.t==='table'&&x.rows&&x.rows.length, asText=tab&&LS.get('tblText',false);
+function figHtml(x,i){ const src=`/books/${BOOK.meta.id}/figs/${encodeURIComponent(x.src)}`, tab=x.t==='table'&&x.rows&&x.rows.length, asText=tab&&(LS.get('tblText',false)||!x.src);   // AI 整理的表格沒有截圖：直接顯示文字版
   // 表格預設顯示原始截圖（跟書上一模一樣）；按「文字版」可以選取、複製
   const table=tab?`<div class="tblw"><table class="tbl">${x.rows.map((r,j)=>`<tr>${r.map(c=>j===0?`<th>${esc(c)}</th>`:`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table></div>`:'';
   const w=Math.round((x.w||800)/2);       // 截圖是 2 倍解析度
@@ -1304,7 +1304,11 @@ function renderPage(){
   const V=visPages(), pos=Math.max(0,V.indexOf(PG)), bp=TWO?pos-(pos%2):pos; BASE=V[bp]; PG=BASE;
   const sides=[BASE].concat(TWO&&V[bp+1]!=null?[V[bp+1]]:[]);
   let h=`<div class="r2 rhead"><div class="L"><div class="ptop"><span class="runhead" title="${esc(BOOK.meta.title)}">${esc(String(BOOK.meta.title).split(/[:：]/)[0])}</span>${AIPG_ERR[PG]?`<span class="err" style="margin-left:8px">${esc(AIPG_ERR[PG])}</span>`:''}<span class="grow"></span>${pgNav(n,1)}</div></div></div>`;
-  h+=`<div class="spread${TWO?' two':''}">${sides.map(p=>`<div class="side" data-side="${p}">${withPg(p,pageRows)}${TWO?`<div class="sfolio">${p+1}</div>`:''}</div>`).join('')}</div>`;
+  // 文章的標題 PDF 裡抽不出來（網站用特殊字型畫的）：第一頁最上面補上書名當標題（只顯示，不是內文，不影響螢光筆）
+  const nrmT=x=>String(x||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(), V0=visPages()[0]||0;
+  const needT=p=>p===V0&&BOOK.meta.hasText&&(BOOK.meta.pages||nPages())<=40&&!(BOOK.pages[p]||[]).slice(0,6).some(x=>isTxt(x)&&nrmT(x).includes(nrmT(BOOK.meta.title).slice(0,40)));
+  const titleRow=p=>needT(p)?`<div class="r2 rc rtitle"><div class="L"><div class="para hd">${esc(BOOK.meta.title)}</div></div></div>`:'';
+  h+=`<div class="spread${TWO?' two':''}">${sides.map(p=>`<div class="side" data-side="${p}">${titleRow(p)}${withPg(p,pageRows)}${TWO?`<div class="sfolio">${p+1}</div>`:''}</div>`).join('')}</div>`;
   h+=`<div class="r2 rf"><div class="L"><div class="rfoot">${pgNav(n)}</div></div></div>`;
   sh.innerHTML=h; sh.classList.toggle('two',TWO); paginate();
   sh.querySelectorAll('.fig img').forEach(im=>{ if(!im.complete) im.addEventListener('load',()=>{ if(BOOK&&!$('vRead').hidden) paginate(firstShown()); },{once:true}); });

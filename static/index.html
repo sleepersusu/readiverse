@@ -194,7 +194,8 @@ dialog h2{font-family:var(--f-zh);font-size:17px;margin:0 0 14px}
 .rbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--line)}
 .rbar .seg .ib{border-radius:0;height:32px;border:0}
 #zhBtn.on,#allBtn.on{background:var(--ink)!important;color:var(--bg);border-color:var(--ink)!important}
-.rbar .bt{font-family:var(--f-read);font-weight:600;font-size:16px;line-height:1.3;flex:1;min-width:0;overflow-wrap:anywhere}
+.rbar .bt{font-family:var(--f-read);font-weight:600;font-size:16px;line-height:1.3;flex:1 1 120px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:900px){.rbar .bt{flex-basis:100%;order:-1}}   /* 窄螢幕（直立）：書名自己一行，工具列在下面一行，不會被擠成一個字一行 */
 .rbar>.grow{flex:0 0 0}
 .pgnav{display:flex;align-items:center;gap:4px;font-family:var(--f-mono);font-size:13px}
 .pgnav input{width:64px;text-align:center;min-height:30px;padding:2px 4px;font-family:var(--f-mono)}
@@ -1271,7 +1272,9 @@ function pgOf(el){ const s=el&&el.closest&&el.closest('[data-side]'); return s?+
 function pageRows(){      // 這一頁（PG）的段落、圖表
   const P=paras(PG);
   const subHead=(t,i)=>isTxt(t)&&isTxt(P[i+1])&&t.trim().length<=60&&t.trim().split(/\s+/).length<=9&&/^[A-Z0-9"“]/.test(t.trim())&&!/[.!?;:,"”’)]$/.test(t.trim());   // 小標題：很短、沒有句尾標點、後面接一段
-  const kind=P.map((t,i)=>{ if(!isTxt(t)) return ''; if(isHead(t)||subHead(t,i)) return 'hd'; const pv=P[i-1];
+  const nrm=x=>String(x||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(), firstTxt=P.findIndex(isTxt);
+  const isDocTitle=(t,i)=>i===firstTxt&&PG===(visPages()[0]||0)&&BOOK&&nrm(t).length>8&&nrm(t)===nrm(BOOK.meta.title);   // 文章第一行就是標題（比較長的新聞標題也算）
+  const kind=P.map((t,i)=>{ if(!isTxt(t)) return ''; if(isHead(t)||subHead(t,i)||isDocTitle(t,i)) return 'hd'; const pv=P[i-1];
     if(i===0) return 'noind'; if(!isTxt(pv)) return 'noind'; if(isHead(pv)||subHead(pv,i-1)) return (isHead(pv)&&t.length>180&&/^[A-Z]/.test(t)?'cap ':'')+'noind'; return ''; });
   // 目錄頁：一整串短短的標題（章名一行一個）→ 當成清單，用一般字的大小，不要每一行都是大標題
   { const H=kind.map((k,i)=>k.includes('hd')&&P[i].trim().length<=70?i:-1).filter(i=>i>=0);

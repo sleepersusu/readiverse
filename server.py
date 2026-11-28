@@ -551,6 +551,7 @@ def _headish(x):
 
 
 def _noise_tok(t):
+    if re.fullmatch(r'[(\[]?[$€£¥]?\d[\d,.]*%?[)\]]?[.,:;]?', t): return False                   # $100,000、(2019)、45%：是數字，不是雜訊
     al = sum(c.isalnum() for c in t)
     return len(t) - al >= 2 and sum(c.isalpha() for c in t) <= 1
 
@@ -608,9 +609,64 @@ def tidy_page(pg):
     return out
 
 
+# 用瀏覽器「列印成 PDF」存下來的網頁（新聞、研究文章）：每頁上下都有瀏覽器加的頁首頁尾
+#   2026/10/28 下午4:04 文章標題 - The New York Times   ／   https://www.nytimes.com/…   ／   3/6
+# 先拿掉，不然「文章標題」每頁都出現，會被當成書的頁首，連第一頁真正的標題都一起刪掉
+_TOD = r'(?:上午|下午|凌晨|清晨|早上|中午|晚上|傍晚|午夜)?'
+_PRINT_HDR = [
+    re.compile(r'^\s*\d{4}/\d{1,2}/\d{1,2}\s*' + _TOD + r'\s*\d{1,2}:\d{2}(?:\s*[AP]M)?\b.*$', re.I),        # 2026/10/28 下午4:04 標題
+    re.compile(r'^\s*\d{1,2}/\d{1,2}/\d{2,4},?\s+\d{1,2}:\d{2}(?:\s*[AP]M)?\b.*$', re.I),                  # 10/28/26, 4:04 PM 標題
+    re.compile(r'^\s*(?:上午|下午|凌晨|清晨|早上|中午|晚上|傍晚|午夜)\d{1,2}:\d{2}\s.*$'),                     # 凌晨2:06 標題（日期被切到上一行）
+    re.compile(r'^\s*https?://\S+\s*$'),                                                                   # 只有網址的一行
+    re.compile(r'^\s*[\w%.-]+/?[\w%./-]*\.(?:html?|php|aspx?)(?:\?\S*)?\s*$', re.I),                       # 網址太長換行，剩下的後半截（visa-fee.html）
+    re.compile(r'^\s*\d{1,3}\s*/\s*\d{1,3}\s*$'),                                                            # 3/6 頁數
+    re.compile(r'^\s*Listen\s*·\s*\d{1,2}:\d{2}\s*min\s*$', re.I),                                              # 新聞網站的「Listen · 6:35 min」語音按鈕
+]
+# 廣告、網站的按鈕和推廣（新聞、雜誌、期刊）：整段拿掉
+_ADS = re.compile(r'^\s*(?:'
+    r'(?:skip\s+)?advertisements?|ad|sponsored(?:\s+content)?|paid\s+post|promoted|supported\s+by|'
+    r'share(?:\s+full\s+article)?|gift\s+this\s+article|give\s+this\s+article|save\s+(?:this\s+)?(?:story|article)|'
+    r'read\s+\d+\s+comments?|\d+\s+comments?|see\s+more\s+on:.*|related\s+(?:content|articles?|coverage)|more\s+on\s+.{2,60}|'
+    r'most\s+popular|trending|recommended(?:\s+for\s+you)?|continue\s+reading\s+the\s+main\s+story|'
+    r'sign\s+up\s+for\s+.{2,80}?(?:newsletter|times|briefing|digest|daily|weekly)\b.*|'
+    r'get\s+(?:our|the)\s+.{2,40}newsletter.*|subscribe(?:\s+(?:now|today|to\s+.{2,60}))?.*|'
+    r'downloaded\s+from\s+\S+.*|this\s+article\s+is\s+protected\s+by\s+copyright.*|terms\s+(?:of|and)\s+(?:use|conditions)'
+    r')\s*$', re.I)
+# 黏在段落最後面的頁尾：「…圖表說明 下午4:04 標題 - The New York Times https://… 2/6」
+_PRINT_TAIL = re.compile(r'\s*(?:\d{4}/\d{1,2}/\d{1,2}\s*)?(?:上午|下午|凌晨|清晨|早上|中午|晚上|傍晚|午夜)\d{1,2}:\d{2}\s.{0,200}?https?://\S+(?:\s+\d{1,3}/\d{1,3})?\s*$')
+_PRINT_URLTAIL = re.compile(r'\s+https?://\S+\s+\d{1,3}/\d{1,3}\s*$')
+def strip_print_artifacts(pages):
+    """拿掉瀏覽器列印的頁首頁尾（只在真的像網頁列印的 PDF 才動：至少一半的頁有這種頁首或網址）"""
+    def hit(x): return is_text(x) and any(r.match(x) for r in _PRINT_HDR)
+    def url_lead(x): return is_text(x) and re.match(r'^\s*https?://\S+\s+\S', x)
+    n = sum(1 for pg in pages if any(hit(x) or url_lead(x) or (is_text(x) and _PRINT_TAIL.search(x)) for x in pg))
+    if not pages or n < max(1, len(pages) * 0.5): return pages
+    out = []
+    for pg in pages:
+        q = []
+        for x in pg:
+            if hit(x): continue
+            if is_text(x) and len(x) < 220 and _ADS.match(x):                                       # 廣告、推廣、網站按鈕
+                q.append({'t': 'drop-ad'}); continue
+            if isinstance(x, dict) and q and q[-1] == {'t': 'drop-ad'}: continue                    # 「Advertisement」底下那張圖就是廣告
+            if is_text(x):
+                if url_lead(x): x = re.sub(r'^\s*https?://\S+\s+', '', x)                                 # 「網址 文章標題…」：只拿掉網址
+                x = _PRINT_URLTAIL.sub('', _PRINT_TAIL.sub('', x)).strip()
+                if not x: continue
+                # 圖表來源黏到下一段：「Source: … • By The New York Times The New York Times analyzed…」→ 切成兩段
+                m = re.match(r'((?:Sources?|Notes?)\s*:.*?•\s*By\s+(?:The\s+)?(?:[A-Z][\w.&’\']*\s+){0,4}?(?:Times|Post|Journal|News|Reuters|Bloomberg|Guardian|Economist|Press|Staff))\s+(?=[A-Z“"])', x)
+                if m and len(x) - m.end() > 40: q.append(m.group(1)); x = x[m.end():]
+            q.append(x)
+        out.append([x for x in q if x != {'t': 'drop-ad'}])
+    return out
+
+
+_SRC_SPLIT = re.compile(r'((?:Sources?|Notes?|Credits?)\s*:.*?•\s*By\s+(?:The\s+)?(?:[A-Z][\w.&’\']*\s+){0,4}?(?:Times|Post|Journal|News|Reuters|Bloomberg|Guardian|Economist|Press|Staff))\s+(?=[A-Z“"])')
+
+
 def clean_pages(pages, frozen=()):
     """回傳清理過的 pages；frozen 裡的頁不動"""
-    pages = [list(pg) for pg in pages]; n = len(pages); frozen = set(frozen)
+    pages = strip_print_artifacts([list(pg) for pg in pages]); n = len(pages); frozen = set(frozen)
     # 1) 段落內：軟連字號、段首的 OCR 雜訊（----=---~->）、多餘空白
     for p, pg in enumerate(pages):
         if p in frozen: continue
@@ -618,6 +674,7 @@ def clean_pages(pages, frozen=()):
         for x in pg:
             if is_text(x):
                 x = re.sub(r'­\s*', '', x)
+                x = re.sub(r'\b([A-Z]{1,4})- (\d)', r'\1-\2', x)                            # 「H- 1B」（換行切開的代號）→ H-1B
                 toks = x.split()
                 while toks and _noise_tok(toks[0]): toks.pop(0)
                 x = ' '.join(toks)
@@ -704,6 +761,7 @@ def clean_pages(pages, frozen=()):
         if not a or not b or a[-1] != len(pages[p]) - 1 or b[0] != 0: continue     # 中間隔著圖表：不接
         last, first = pages[p][a[-1]].strip(), pages[p + 1][b[0]].strip()
         if re.search(r'[.!?:;"”’)\]—–]$', last): continue
+        if re.match(r'(?:Source|Sources|Note|Notes|Credit|Photo|Photograph|Illustration|Chart|Graphic|Image)s?\b\s*[:：]', last, re.I) or ' • ' in last: continue   # 圖表的來源、說明：不會接到下一頁
         if len(last.split()) < 8 and not re.match(r'[a-z(]', first): continue      # 上一頁最後是目錄、標題這種短行：不接
         if re.search(r'[A-Za-z]-$', last) and re.match(r'[a-z]', first):          # ex- / pected（twenty- / four 這種複合字留著連字號）
             x, y = re.search(r'([A-Za-z]+)-$', last).group(1), re.match(r'([A-Za-z]+)', first).group(1)
@@ -713,6 +771,26 @@ def clean_pages(pages, frozen=()):
             pages[p][a[-1]] = last + ' ' + first
         else: continue
         pages[p + 1].pop(b[0])
+    # 文章開頭的大標題太長、被切成兩行兩段：「$100,000 Per Employee: How the H-1B Visa Fee Could」＋「Reshape Work Forces」→ 接回一段
+    for p in range(min(2, n)):
+        if p in frozen: continue
+        T = [i for i, x in enumerate(pages[p]) if is_text(x)][:3]
+        if len(T) >= 2 and T[1] == T[0] + 1:
+            a_, b_ = pages[p][T[0]].strip(), pages[p][T[1]].strip()
+            cap = lambda t: (lambda w: len(w) >= 2 and sum(1 for x in w if x[:1].isupper() or not x[:1].isalpha()) >= 0.7 * len(w))(t.split())
+            if (not re.search(r'[.!?:;,"”’)]$', a_) and len(a_) <= 100 and len(b_) <= 60 and not re.search(r'[.!?]$', b_)
+                    and cap(a_) and cap(b_) and b_[:1].isupper()):
+                pages[p][T[0]] = a_ + ' ' + b_; pages[p].pop(T[1])
+            break
+    # 最後：圖表來源黏到後面的內文 →「Source: … • By The New York Times」｜「The New York Times analyzed…」切開
+    for p, pg in enumerate(pages):
+        if p in frozen: continue
+        out = []
+        for x in pg:
+            m = is_text(x) and _SRC_SPLIT.match(x)
+            if m and len(x) - m.end() > 40: out += [m.group(1), x[m.end():]]
+            else: out.append(x)
+        pages[p] = out
     return pages
 
 
@@ -802,7 +880,7 @@ def read_page_ai(bid, pno, imgdir, kind='fast'):
     """解析不出文字的頁：讓 AI 直接看頁面圖，把內文一段一段讀出來（掃描書、壞掉的 PDF 都可以）"""
     d = os.path.join(LIB, bid)
     img = os.path.join(imgdir, 'p%d.jpg' % (pno + 1))
-    if not os.path.exists(img): return {'ok': False, 'error': '沒有頁面圖'}
+    if not os.path.exists(img): return {'ok': False, 'error': '沒有頁面圖' + ('：' + RENDER_ERR[bid] if RENDER_ERR.get(bid) else ''), 'noimg': True}
     c = claude_path()
     if not c: raise RuntimeError('找不到 Claude Code')
     r = run_claude(READ_PROMPT % img, ai_model(kind), 300, ('--allowedTools', 'Read', '--add-dir', imgdir))
@@ -834,9 +912,14 @@ PROOF_PROMPT = ("Read the image file %s. It is one page of a printed book.\n"
     "fix it by inserting it in the right place and replacing the misplaced copy with an empty string), "
     "wrong punctuation (em dashes, quotes, apostrophes). Footnote reference numbers should be superscript digits (like ¹⁹) right after the word or punctuation.\n"
     "Ignore the running header and page number, line-end hyphenation, indentation and paragraph spacing. The LAST paragraph may continue past the bottom of this page (we join paragraphs that run onto the next page): text after the last line shown is NOT an error, never delete it.\n"
+    "If this page comes from a website, newspaper or journal, also find things that are NOT part of the article itself: advertisements and sponsored content "
+    "(text or images), newsletter / subscribe / sign-up prompts, share / save / gift / comment buttons, 'related articles', 'most popular' or 'more on' lists, "
+    "cookie notices and other website menus. List them in \"remove\" (paragraph indexes) and \"removeFigs\" (indexes into \"figs\", the images we extracted "
+    "from this page, in order). Never list the article's own text, charts, photos or their captions.\n"
     "Reply with ONLY JSON:\n"
     "{\"fixes\":[{\"where\":\"prev_tail\" or a paragraph index,\"find\":\"exact short substring as given\",\"replace\":\"what the page says\"}],\n"
     " \"inserts\":[{\"where\":\"prev_tail\" or a paragraph index,\"after\":\"exact short substring as given\",\"insert\":\"missing text exactly as printed\"}],\n"
+    " \"remove\":[paragraph index, ...], \"removeFigs\":[figure index, ...],\n"
     " \"ok\":true or false}\n\n%s")
 
 
@@ -848,7 +931,10 @@ def render_pages(bid, nums):
         code = ('import sys,pypdfium2 as P;d=P.PdfDocument(sys.argv[1]);o=sys.argv[2]\n'
                 'for n in map(int,sys.argv[3:]): d[n-1].render(scale=2).to_pil().convert("RGB").save("%s/p%d.jpg"%(o,n),quality=85)')
         for k in range(0, len(todo), 50):
-            subprocess.run([VPY, '-c', code, os.path.join(LIB, bid, 'book.pdf'), out] + [str(n) for n in todo[k:k + 50]], capture_output=True, timeout=600)
+            r = subprocess.run([VPY, '-c', code, os.path.join(LIB, bid, 'book.pdf'), out] + [str(n) for n in todo[k:k + 50]],
+                               capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=600, env=CHILD_ENV)
+            if r.returncode != 0: RENDER_ERR[bid] = ((r.stderr or r.stdout or '').strip().splitlines() or ['畫頁面圖失敗'])[-1][:200]
+    elif todo: RENDER_ERR[bid] = '找不到 Docling 的 Python 環境（%s）' % VPY
     return out
 
 
@@ -936,8 +1022,10 @@ def proof_page(bid, pno, imgdir, kind='best'):
     if not paras: return {'ok': True, 'skip': 'no text'}
     prev = next((x for x in reversed(pages[pno - 1]) if is_text(x)), '') if pno > 0 else ''
     img = os.path.join(imgdir, 'p%d.jpg' % (pno + 1))
-    if not os.path.exists(img): return {'ok': False, 'error': '沒有頁面圖'}
-    payload = json.dumps({'prev_tail': prev[-200:], 'paras': {str(i): t for i, t in enumerate(paras)}}, ensure_ascii=False)
+    if not os.path.exists(img): return {'ok': False, 'error': '沒有頁面圖' + ('：' + RENDER_ERR[bid] if RENDER_ERR.get(bid) else ''), 'noimg': True}
+    figs = [x for x in pages[pno] if isinstance(x, dict)]
+    payload = json.dumps({'prev_tail': prev[-200:], 'paras': {str(i): t for i, t in enumerate(paras)},
+                          'figs': {str(k): (x.get('cap') or '(no caption)')[:120] for k, x in enumerate(figs)}}, ensure_ascii=False)
     c = claude_path()
     if not c: raise RuntimeError('找不到 Claude Code')
     r = run_claude(PROOF_PROMPT % (img, payload), ai_model(kind), 300, ('--allowedTools', 'Read', '--add-dir', imgdir))
@@ -954,8 +1042,33 @@ def proof_page(bid, pno, imgdir, kind='best'):
         pages = read_json(os.path.join(d, 'pages.json')) or []
         frozen = used_pages(read_json(os.path.join(d, 'state.json'), {}))
         applied, failed = apply_proof(pages, pno, j, frozen, _raw_norm(d))
-        if applied: save_pages(d, pages)
-    return {'ok': bool(j.get('ok')) and not failed, 'applied': applied, 'failed': failed, 't': int(time.time())}
+        removed = drop_ads(pages, pno, j, frozen)
+        if applied or removed: save_pages(d, pages)
+    return {'ok': bool(j.get('ok')) and not failed, 'applied': applied, 'failed': failed, 'removed': removed, 't': int(time.time())}
+
+
+def drop_ads(pages, pno, j, frozen):
+    """AI 看頁面圖判斷是廣告、網站按鈕、推廣的段落和圖片：拿掉。保守：長段落（像內文）不刪；畫過螢光筆、寫過筆記的頁不動"""
+    if pno in frozen or pno >= len(pages): return []
+    def idxs(key):
+        out = set()
+        for v in j.get(key) or []:
+            try: out.add(int(v))
+            except (TypeError, ValueError): pass
+        return out
+    rp, rf = idxs('remove'), idxs('removeFigs')
+    if not rp and not rf: return []
+    ti = fi = 0; keep, removed = [], []
+    for x in pages[pno]:
+        if is_text(x):
+            if ti in rp and len(x) <= 400: removed.append(x[:80]); ti += 1; continue     # 超過 400 字的不太會是廣告：留著
+            ti += 1
+        elif isinstance(x, dict):
+            if fi in rf: removed.append('[圖] ' + (x.get('cap') or x.get('src') or '')[:60]); fi += 1; continue
+            fi += 1
+        keep.append(x)
+    pages[pno] = keep
+    return removed
 
 
 PROOF_ACTIVE = set()          # 正在校對的書（同一本不會同時跑兩份）
@@ -1033,6 +1146,9 @@ def proof_job(bid):
                 update_book(bid, proof=pr)
         with ThreadPoolExecutor(max_workers=workers) as ex:
             list(ex.map(one, sorted(todo)))
+        rr = recs(kind)
+        if todo and all((rr.get(str(i + 1)) or {}).get('noimg') for i in todo) and not stop[0]:   # 一頁圖都畫不出來：不要假裝在跑，直接告訴使用者原因
+            stop[0] = '沒辦法把 PDF 頁面畫成圖給 AI 看' + ('：' + RENDER_ERR[bid] if RENDER_ERR.get(bid) else '（Docling 環境有問題，重開 App 會重新檢查）')
     # 第 1 輪：Haiku 每一頁（Sonnet 已經看過的頁就不用）
     best_done = checked('best')
     want = [i for i in textp if i not in best_done]
@@ -1124,6 +1240,9 @@ HOME_DIR = os.path.expanduser('~/.readiverse')
 VENV = os.path.join(HOME_DIR, 'docling-venv')
 VPY = os.path.join(VENV, 'Scripts', 'python.exe') if sys.platform.startswith('win') else os.path.join(VENV, 'bin', 'python')
 DOCLING = {'status': 'checking', 'error': ''}      # checking / installing / ready / unavailable / error
+# 叫 Docling 環境的 Python 時一律用 UTF-8：Windows 預設用系統編碼（cp950），遇到 ʻ、—、下午 這種字一印出來就當掉（Docling 解析失敗 代碼 1、沒有頁面圖）
+CHILD_ENV = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONUTF8='1')
+RENDER_ERR = {}
 DOCLING_READY = threading.Event()
 
 
@@ -1155,7 +1274,7 @@ def docling_setup(force=False):
     """檢查 Docling 能不能用，不能用就在背景安裝（約 2 GB，第一次要幾分鐘）"""
     PKGS = ['docling'] + (['ocrmac'] if sys.platform == 'darwin' else [])     # ocrmac：用 Mac 內建的 Apple Vision 辨識掃描書
     def ok(mod='docling'):
-        try: return os.path.exists(VPY) and subprocess.run([VPY, '-c', 'import ' + mod], capture_output=True, timeout=120).returncode == 0
+        try: return os.path.exists(VPY) and subprocess.run([VPY, '-c', 'import ' + mod], capture_output=True, timeout=120, env=CHILD_ENV).returncode == 0
         except Exception: return False
     if ok():
         if sys.platform == 'darwin' and not ok('ocrmac'):           # 以前裝的環境沒有 ocrmac：補裝（很快）
@@ -1399,8 +1518,10 @@ def parse_job(bid):
     d = os.path.join(LIB, bid); pdf = os.path.join(d, 'book.pdf'); figdir = os.path.join(d, 'figs')
     st = dict(b.get('parse') or {}); start = int(st.get('next') or 0) + 1
     update_book(bid, parse={'status': 'running', 'next': start - 1, 'total': b.get('pages') or 0})
+    errf = os.path.join(HOME_DIR, 'docling-parse.log'); os.makedirs(HOME_DIR, exist_ok=True)
+    elog = open(errf, 'w', encoding='utf-8', errors='replace')            # Docling 的錯誤訊息（失敗時顯示原因）
     p = subprocess.Popen([VPY, os.path.join(ROOT, 'docling_worker.py'), pdf, figdir, '20', str(start)],
-                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8')
+                         stdout=subprocess.PIPE, stderr=elog, text=True, encoding='utf-8', errors='replace', env=CHILD_ENV)
     PARSE_PROC[bid] = p; total = b.get('pages') or 0; got = False; lost = {}; scanned = bool(b.get('scanned')); raw_rep = None; raw_rep6 = None
     try:
         for line in p.stdout:
@@ -1450,9 +1571,11 @@ def parse_job(bid):
                             hasText=True if got else b.get('hasText'))
         p.wait()
     finally:
-        PARSE_PROC.pop(bid, None)
+        PARSE_PROC.pop(bid, None); elog.close()
     if p.returncode not in (0, None) and not got:
-        update_book(bid, parse={'status': 'error', 'error': 'Docling 解析失敗（代碼 %s）' % p.returncode})
+        try: why = [x for x in open(errf, encoding='utf-8', errors='replace').read().strip().splitlines() if x.strip() and 'Warning' not in x][-1][:200]
+        except Exception: why = ''
+        update_book(bid, parse={'status': 'error', 'error': 'Docling 解析失敗（代碼 %s）%s' % (p.returncode, '：' + why if why else '')})
         queue_proof(bid); return                                                       # 解析失敗：AI 直接看頁面圖讀
     with LOCK:
         pages = read_json(os.path.join(d, 'pages.json')) or []
@@ -1508,7 +1631,7 @@ def render_cover(bid, page_no):
     d = os.path.join(LIB, bid)
     code = ('import sys,pypdfium2 as P;d=P.PdfDocument(sys.argv[1]);p=d[int(sys.argv[2])-1];'
             's=480/p.get_width();p.render(scale=s).to_pil().convert("RGB").save(sys.argv[3],"JPEG",quality=84)')
-    r = subprocess.run([VPY, '-c', code, os.path.join(d, 'book.pdf'), str(page_no), os.path.join(d, 'cover.jpg')], capture_output=True, timeout=120)
+    r = subprocess.run([VPY, '-c', code, os.path.join(d, 'book.pdf'), str(page_no), os.path.join(d, 'cover.jpg')], capture_output=True, timeout=120, env=CHILD_ENV)
     return r.returncode == 0
 
 

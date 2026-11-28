@@ -210,7 +210,7 @@ def paras_from_lines(lines, W, H):
             if cur: out.append((cur, kind, y0))
             cur = s; kind = 'h' if is_head else 'p'; y0 = L['y']
         else:
-            cur = hy_join(cur, s) if (cur.endswith('-') and s[:1].islower()) else cur + ' ' + s
+            cur = hy_join(cur, s) if (cur.endswith('-') and s[:1].islower()) else (cur + s) if re.search(r'\b[A-Z]{1,4}-$', cur) and s[:1].isdigit() else cur + ' ' + s   # H- / 1B → H-1B
         prev = L
     if cur: out.append((cur, kind, y0))
     return out

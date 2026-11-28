@@ -565,6 +565,7 @@ table.list .rprog{width:100%;min-width:110px}
 .sres{margin-top:26px}.sres .shd{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}.sres h2{margin:0;font-size:18px}.sres .all{margin-left:auto}
 .slist{display:flex;flex-direction:column;gap:6px}.sitem{padding:9px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;background:var(--surface)}.sitem:hover{background:var(--soft)}
 .sitem b{font-weight:600}.sctx{font-family:var(--f-read);font-size:13.5px;color:var(--muted);margin-top:3px;line-height:1.5}.sctx b,.sitem .note b{color:var(--ink)}
+.para.meta{font-size:.82em;color:var(--muted);margin:.15em 0;line-height:1.5}
 .para.tl{margin:.1em 0;font-size:1em;font-weight:500}
 .sheet .r2>.R,.sheet .gut,#pgNote{display:none!important}
 .sheet .r2>.L{padding-right:0!important}
@@ -1286,7 +1287,9 @@ function pageRows(){      // 這一頁（PG）的段落、圖表
   const subHead=(t,i)=>isTxt(t)&&isTxt(P[i+1])&&t.trim().length<=60&&t.trim().split(/\s+/).length<=9&&/^[A-Z0-9"“]/.test(t.trim())&&!/[.!?;:,"”’)]$/.test(t.trim());   // 小標題：很短、沒有句尾標點、後面接一段
   const nrm=x=>String(x||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(), firstTxt=P.findIndex(isTxt);
   const isDocTitle=(t,i)=>i===firstTxt&&PG===(visPages()[0]||0)&&BOOK&&nrm(t).length>8&&nrm(t)===nrm(BOOK.meta.title);   // 文章第一行就是標題（比較長的新聞標題也算）
-  const kind=P.map((t,i)=>{ if(!isTxt(t)) return ''; if(isHead(t)||subHead(t,i)||isDocTitle(t,i)) return 'hd'; const pv=P[i-1];
+  // 新聞、論文的作者、日期那一行（By …、Published …、Sept. 23, 2026）：小字，不是標題
+  const isMeta=t=>{ t=t.trim(); return t.length<=140&&(/^(By|Published|Updated|Reporting from|Photographs? by|Illustrations? by|Written by|Posted|Received|Accepted)\b/.test(t)||/^(Jan|Feb|Mar|Apr|May|June?|July?|Aug|Sept?|Oct|Nov|Dec)[a-z]*\.? \d{1,2}, \d{4}\b/.test(t)); };
+  const kind=P.map((t,i)=>{ if(!isTxt(t)) return ''; if(isMeta(t)) return 'meta noind'; if(isHead(t)||subHead(t,i)||isDocTitle(t,i)) return 'hd'; const pv=P[i-1];
     if(i===0) return 'noind'; if(!isTxt(pv)) return 'noind'; if(isHead(pv)||subHead(pv,i-1)) return (isHead(pv)&&t.length>180&&/^[A-Z]/.test(t)?'cap ':'')+'noind'; return ''; });
   // 目錄頁：一整串短短的標題（章名一行一個）→ 當成清單，用一般字的大小，不要每一行都是大標題
   { const H=kind.map((k,i)=>k.includes('hd')&&P[i].trim().length<=70?i:-1).filter(i=>i>=0);
@@ -1295,7 +1298,7 @@ function pageRows(){      // 這一頁（PG）的段落、圖表
   if(!P.length) return BOOK.meta.hasText
     ? `<div class="r2 rc blankpg" data-i="0"><div class="L"><button type="button" class="linkbtn" data-mode-go="pdf" title="這一頁沒有文字（原書的空白頁或整頁圖）">看原始頁面</button></div></div>`      // 原書的空白頁：就是空白的一頁
     : `<div class="r2 rc" data-i="0"><div class="L"><div class="notext">這本 PDF 是掃描圖片，抽不出文字。<br><button type="button" class="small" style="margin-top:10px" data-mode-go="pdf">看原始頁面</button></div></div></div>`;
-  return P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${/^• /.test(t)?' li':''}${DIV?(isLabel(t)?' dvl':i===P.findIndex(x=>isTxt(x)&&!isLabel(x))?' dvt':' dvs'):''}${DIV&&i===0?' dv1':''}${!DIV&&isLabel(t)?' lbl':''}${kind[i].includes('hd')?' hd':''}${kind[i].includes('tl')?' tl':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${PG}_${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div></div>`).join(''); }
+  return P.map((t,i)=>!isTxt(t)?`<div class="r2 rc" data-fi="${i}"><div class="L">${figHtml(t,i)}</div></div>`:`<div class="r2 rc" data-i="${i}"><div class="L"><div class="para${/^• /.test(t)?' li':''}${DIV?(isLabel(t)?' dvl':i===P.findIndex(x=>isTxt(x)&&!isLabel(x))?' dvt':' dvs'):''}${DIV&&i===0?' dv1':''}${!DIV&&isLabel(t)?' lbl':''}${kind[i].includes('hd')?' hd':''}${kind[i].includes('tl')?' tl':''}${kind[i].includes('meta')?' meta':''}${kind[i].includes('hd')&&!isHead(t)?' sub':''}${kind[i].includes('cap')?' cap':''}" id="en${PG}_${i}"><div class="ptx${kind[i].includes('noind')?' noind':''}" lang="en" data-k="${i}">${renderPara(t,ST.marks[mkey(PG,i)]||[])}</div>${zhHtml(i)}</div></div></div>`).join(''); }
 function renderPage(){
   const sh=$('sheet'), n=nPages(); TWO=twoOK(); PG=nearVis(PG,1);
   const V=visPages(), pos=Math.max(0,V.indexOf(PG)), bp=TWO?pos-(pos%2):pos; BASE=V[bp]; PG=BASE;

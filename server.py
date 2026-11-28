@@ -648,6 +648,8 @@ def strip_print_artifacts(pages):
             if hit(x): continue
             if is_text(x) and len(x) < 220 and _ADS.match(x):                                       # 廣告、推廣、網站按鈕
                 q.append({'t': 'drop-ad'}); continue
+            if is_text(x) and q and q[-1] == {'t': 'drop-ad'} and len(x) < 220 and (x[:1].islower() or re.search(r'\b(inbox|subscribe|sign up|newsletter|unsubscribe)\b', x, re.I)):
+                continue                                                                              # 推廣文字換行的後半段（「nature, the cosmos … Get it sent to your inbox.」）
             if isinstance(x, dict) and q and q[-1] == {'t': 'drop-ad'}: continue                    # 「Advertisement」底下那張圖就是廣告
             if is_text(x):
                 if url_lead(x): x = re.sub(r'^\s*https?://\S+\s+', '', x)                                 # 「網址 文章標題…」：只拿掉網址
@@ -664,9 +666,16 @@ def strip_print_artifacts(pages):
 _SRC_SPLIT = re.compile(r'((?:Sources?|Notes?|Credits?)\s*:.*?•\s*By\s+(?:The\s+)?(?:[A-Z][\w.&’\']*\s+){0,4}?(?:Times|Post|Journal|News|Reuters|Bloomberg|Guardian|Economist|Press|Staff))\s+(?=[A-Z“"])')
 
 
+def is_icon(x):
+    """網頁抽出來的小圖：播放按鈕、作者大頭貼、分享按鈕、logo（兩邊都不到 120 像素＝不到 60 點）"""
+    return isinstance(x, dict) and x.get('t') != 'table' and 0 < (x.get('w') or 999) < 120 and 0 < (x.get('h') or 999) < 120
+
+
 def clean_pages(pages, frozen=()):
     """回傳清理過的 pages；frozen 裡的頁不動"""
     pages = strip_print_artifacts([list(pg) for pg in pages]); n = len(pages); frozen = set(frozen)
+    for p in range(n):                                                     # 小圖示（播放鍵、作者頭像）不是內容
+        if p not in frozen: pages[p] = [x for x in pages[p] if not is_icon(x)]
     # 1) 段落內：軟連字號、段首的 OCR 雜訊（----=---~->）、多餘空白
     for p, pg in enumerate(pages):
         if p in frozen: continue
@@ -914,6 +923,7 @@ PROOF_PROMPT = ("Read the image file %s. It is one page of a printed book.\n"
     "Ignore the running header and page number, line-end hyphenation, indentation and paragraph spacing. The LAST paragraph may continue past the bottom of this page (we join paragraphs that run onto the next page): text after the last line shown is NOT an error, never delete it.\n"
     "If this page comes from a website, newspaper or journal, also find things that are NOT part of the article itself: advertisements and sponsored content "
     "(text or images), newsletter / subscribe / sign-up prompts, share / save / gift / comment buttons, 'related articles', 'most popular' or 'more on' lists, "
+    "author headshots / byline avatars, audio or video play buttons, icons and logos, "
     "cookie notices and other website menus. List them in \"remove\" (paragraph indexes) and \"removeFigs\" (indexes into \"figs\", the images we extracted "
     "from this page, in order). Never list the article's own text, charts, photos or their captions.\n"
     "Reply with ONLY JSON:\n"
